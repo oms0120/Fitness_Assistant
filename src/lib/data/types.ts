@@ -34,3 +34,17 @@ export interface PlanDay {
   muscleGroup: MuscleGroup;
   exercises: PlanExercise[];
 }
+
+export const MUSCLE_GROUP_LABELS: Record<MuscleGroup, string> = {
+  chest: "胸",
+  shoulder: "肩",
+  back: "背",
+  legs: "腿",
+  arms: "臂",
+};
+
+export const DIFFICULTY_LABELS: Record<Exercise["difficulty"], string> = {
+  beginner: "入门",
+  intermediate: "中级",
+  advanced: "高级",
+};

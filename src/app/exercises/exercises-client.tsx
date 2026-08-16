@@ -2,14 +2,14 @@
 
 import { useState } from "react";
 import { exercises } from "@/lib/data/exercises";
-import type { MuscleGroup } from "@/lib/data/types";
+import { DIFFICULTY_LABELS, MUSCLE_GROUP_LABELS, type MuscleGroup } from "@/lib/data/types";
 
 const GROUPS: { key: MuscleGroup; label: string }[] = [
-  { key: "chest", label: "胸" },
-  { key: "shoulder", label: "肩" },
-  { key: "back", label: "背" },
-  { key: "legs", label: "腿" },
-  { key: "arms", label: "臂" },
+  { key: "chest", label: MUSCLE_GROUP_LABELS.chest },
+  { key: "shoulder", label: MUSCLE_GROUP_LABELS.shoulder },
+  { key: "back", label: MUSCLE_GROUP_LABELS.back },
+  { key: "legs", label: MUSCLE_GROUP_LABELS.legs },
+  { key: "arms", label: MUSCLE_GROUP_LABELS.arms },
 ];
 
 export function ExercisesClient() {
@@ -34,7 +34,7 @@ export function ExercisesClient() {
           <div key={e.id} className="rounded-xl border border-zinc-200 p-5 dark:border-zinc-800">
             <div className="flex items-center justify-between">
               <div className="font-medium">{e.name}</div>
-              <span className="text-xs text-zinc-500">{e.difficulty}</span>
+              <span className="text-xs text-zinc-500">{DIFFICULTY_LABELS[e.difficulty]}</span>
             </div>
             <div className="mt-1 text-sm text-zinc-500">{e.equipment}</div>
             <p className="mt-3 text-sm text-zinc-600 dark:text-zinc-400">{e.instructions}</p>

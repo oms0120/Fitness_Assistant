@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { planTemplates } from "@/lib/data/plans";
 import { exercises } from "@/lib/data/exercises";
-import type { PlanDay } from "@/lib/data/types";
+import { MUSCLE_GROUP_LABELS, type MuscleGroup, type PlanDay } from "@/lib/data/types";
 
 const STORAGE_KEY = "training-plans-v1";
 
@@ -12,7 +12,11 @@ function loadPlans(): PlanDay[] {
   const raw = window.localStorage.getItem(STORAGE_KEY);
   if (!raw) return planTemplates;
   try {
-    return JSON.parse(raw) as PlanDay[];
+    const parsed = JSON.parse(raw);
+    if (Array.isArray(parsed) && parsed.every((d) => d && Array.isArray(d.exercises))) {
+      return parsed as PlanDay[];
+    }
+    return planTemplates;
   } catch {
     return planTemplates;
   }
@@ -102,11 +106,11 @@ export function PlansClient() {
                 <div className="flex items-center gap-3">
                   <label className="flex items-center gap-1 text-sm">
                     组数
-                    <input type="number" min={1} value={pe.sets} onChange={(e) => updateSets(Number(e.target.value), idx)} className="w-14 rounded border border-zinc-300 px-2 py-1 dark:border-zinc-700 dark:bg-zinc-900" />
+                    <input type="number" min={1} value={pe.sets} onChange={(e) => updateSets(Math.max(1, Number(e.target.value) || 1), idx)} className="w-14 rounded border border-zinc-300 px-2 py-1 dark:border-zinc-700 dark:bg-zinc-900" />
                   </label>
                   <label className="flex items-center gap-1 text-sm">
                     次数
-                    <input type="number" min={1} value={pe.reps} onChange={(e) => updateReps(Number(e.target.value), idx)} className="w-14 rounded border border-zinc-300 px-2 py-1 dark:border-zinc-700 dark:bg-zinc-900" />
+                    <input type="number" min={1} value={pe.reps} onChange={(e) => updateReps(Math.max(1, Number(e.target.value) || 1), idx)} className="w-14 rounded border border-zinc-300 px-2 py-1 dark:border-zinc-700 dark:bg-zinc-900" />
                   </label>
                   <button onClick={() => removeExercise(idx)} className="text-sm text-red-500">删除</button>
                 </div>
@@ -122,8 +126,12 @@ export function PlansClient() {
               className="w-full rounded-lg border border-zinc-300 px-3 py-2 dark:border-zinc-700 dark:bg-zinc-900"
             >
               <option value="" disabled>选择动作…</option>
-              {exercises.map((e) => (
-                <option key={e.id} value={e.id}>{e.name}（{e.muscleGroup}）</option>
+              {(Object.keys(MUSCLE_GROUP_LABELS) as MuscleGroup[]).map((group) => (
+                <optgroup key={group} label={MUSCLE_GROUP_LABELS[group]}>
+                  {exercises.filter((e) => e.muscleGroup === group).map((e) => (
+                    <option key={e.id} value={e.id}>{e.name}（{MUSCLE_GROUP_LABELS[e.muscleGroup]}）</option>
+                  ))}
+                </optgroup>
               ))}
             </select>
           </div>

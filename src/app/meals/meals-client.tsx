@@ -46,6 +46,8 @@ export function MealsClient() {
     const kcal = Number(target);
     if (Number.isFinite(kcal) && kcal > 0) {
       setMatched(matchRecipesByCalories(kcal, 0.1));
+    } else {
+      setMatched(null);
     }
   }
 

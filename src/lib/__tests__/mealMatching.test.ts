@@ -1,7 +1,5 @@
 import { describe, it, expect } from "vitest";
 import { matchRecipesByCalories, filterExercisesByGroup } from "@/lib/mealMatching";
-import { recipes } from "@/lib/data/recipes";
-import { exercises } from "@/lib/data/exercises";
 
 describe("matchRecipesByCalories", () => {
   it("返回热量在 ±10% 内的菜谱，按差值升序", () => {
@@ -21,6 +19,7 @@ describe("matchRecipesByCalories", () => {
     const result = matchRecipesByCalories(9999, 0.1);
     expect(result.length).toBe(1);
     expect(result[0]).toBeDefined();
+    expect(result[0].id).toBe("beef-burger");
   });
 });
 
