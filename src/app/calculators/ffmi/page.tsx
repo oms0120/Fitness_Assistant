@@ -15,7 +15,11 @@ export default function FfmiPage() {
   function onSubmit(e: React.FormEvent) {
     e.preventDefault();
     const res = calculateFfmi({ weightKg: Number(weightKg), heightCm: Number(heightCm), bodyFatPct: Number(bodyFatPct) });
-    if (!res.ok) return setErrors(res.errors);
+    if (!res.ok) {
+      setResult(null);
+      setErrors(res.errors);
+      return;
+    }
     setErrors({});
     setResult(res.data);
   }

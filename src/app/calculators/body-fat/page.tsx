@@ -23,7 +23,11 @@ export default function BodyFatPage() {
       waistCm: Number(waistCm),
       hipCm: sex === "female" ? Number(hipCm) : undefined,
     });
-    if (!res.ok) return setErrors(res.errors);
+    if (!res.ok) {
+      setResult(null);
+      setErrors(res.errors);
+      return;
+    }
     setErrors({});
     setResult(res.data.bodyFatPct);
   }

@@ -2,8 +2,8 @@ import { z } from "zod";
 import { parseResult } from "./result";
 
 export const ffmiInputSchema = z.object({
-  weightKg: z.number().min(30).max(300),
-  heightCm: z.number().min(100).max(250),
+  weightKg: z.number().min(30, "体重需 ≥ 30kg").max(300, "体重需 ≤ 300kg"),
+  heightCm: z.number().min(100, "身高需 ≥ 100cm").max(250, "身高需 ≤ 250cm"),
   bodyFatPct: z.number().min(2).max(60, "体脂率需在 2-60%"),
 });
 

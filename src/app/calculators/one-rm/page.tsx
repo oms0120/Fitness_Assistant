@@ -14,7 +14,11 @@ export default function OneRmPage() {
   function onSubmit(e: React.FormEvent) {
     e.preventDefault();
     const res = calculateOneRm({ weightKg: Number(weightKg), reps: Number(reps) });
-    if (!res.ok) return setErrors(res.errors);
+    if (!res.ok) {
+      setResult(null);
+      setErrors(res.errors);
+      return;
+    }
     setErrors({});
     setResult(res.data);
   }

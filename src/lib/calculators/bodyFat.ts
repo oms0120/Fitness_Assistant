@@ -1,15 +1,13 @@
 import { z } from "zod";
 import { parseResult } from "./result";
 
-const range = { min: 20, max: 120 } as const;
-
 export const bodyFatInputSchema = z
   .object({
     sex: z.enum(["male", "female"], { message: "请选择性别" }),
     heightCm: z.number().min(100, "身高需 ≥ 100cm").max(250, "身高需 ≤ 250cm"),
-    neckCm: z.number().min(range.min).max(range.max),
-    waistCm: z.number().min(range.min).max(range.max),
-    hipCm: z.number().min(range.min).max(range.max).optional(),
+    neckCm: z.number().min(20, "围度需 ≥ 20cm").max(120, "围度需 ≤ 120cm"),
+    waistCm: z.number().min(20, "围度需 ≥ 20cm").max(120, "围度需 ≤ 120cm"),
+    hipCm: z.number().min(20, "围度需 ≥ 20cm").max(120, "围度需 ≤ 120cm").optional(),
   })
   .superRefine((v, ctx) => {
     if (v.sex === "male") {

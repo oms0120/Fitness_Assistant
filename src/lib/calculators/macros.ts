@@ -4,7 +4,7 @@ import { Goal, MACRO_DEFAULTS } from "./types";
 
 export const macrosInputSchema = z.object({
   tdee: z.number().positive("TDEE 需为正数"),
-  weightKg: z.number().min(30).max(300),
+  weightKg: z.number().min(30, "体重需 ≥ 30kg").max(300, "体重需 ≤ 300kg"),
   goal: z.nativeEnum(Goal, { message: "请选择目标" }),
   overrides: z
     .object({

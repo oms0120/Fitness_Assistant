@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { calculateBmr, calculateTdee, ActivityLevel, ACTIVITY_FACTORS } from "@/lib/calculators";
+import { calculateBmr, calculateTdee, ActivityLevel, ACTIVITY_FACTORS, ACTIVITY_LEVEL_LABELS } from "@/lib/calculators";
 import { NumberField } from "@/components/calculators/NumberField";
 import { ResultField } from "@/components/calculators/ResultField";
 
@@ -17,9 +17,17 @@ export default function BmrPage() {
   function onSubmit(e: React.FormEvent) {
     e.preventDefault();
     const bmrRes = calculateBmr({ sex, weightKg: Number(weightKg), heightCm: Number(heightCm), age: Number(age) });
-    if (!bmrRes.ok) return setErrors(bmrRes.errors);
+    if (!bmrRes.ok) {
+      setResult(null);
+      setErrors(bmrRes.errors);
+      return;
+    }
     const tdeeRes = calculateTdee({ bmr: bmrRes.data.bmr, activityLevel: activity });
-    if (!tdeeRes.ok) return setErrors(tdeeRes.errors);
+    if (!tdeeRes.ok) {
+      setResult(null);
+      setErrors(tdeeRes.errors);
+      return;
+    }
     setErrors({});
     setResult({ bmr: bmrRes.data.bmr, tdee: tdeeRes.data.tdee });
   }
@@ -47,7 +55,7 @@ export default function BmrPage() {
             className="w-full rounded-lg border border-zinc-300 px-3 py-2 dark:border-zinc-700 dark:bg-zinc-900"
           >
             {Object.entries(ACTIVITY_FACTORS).map(([k]) => (
-              <option key={k} value={k}>{k}</option>
+              <option key={k} value={k}>{ACTIVITY_LEVEL_LABELS[k as ActivityLevel]}</option>
             ))}
           </select>
         </label>

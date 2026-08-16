@@ -25,6 +25,14 @@ export const ACTIVITY_FACTORS: Record<ActivityLevel, number> = {
   [ActivityLevel.EXTREME]: 1.9,
 };
 
+export const ACTIVITY_LEVEL_LABELS: Record<ActivityLevel, string> = {
+  [ActivityLevel.SEDENTARY]: "久坐（几乎不运动）",
+  [ActivityLevel.LIGHT]: "轻度（每周 1–3 次）",
+  [ActivityLevel.MODERATE]: "中度（每周 3–5 次）",
+  [ActivityLevel.HIGH]: "高强度（每周 6–7 次）",
+  [ActivityLevel.EXTREME]: "极高强度（每日多训）",
+};
+
 // 宏量营养默认值（高级设置可覆盖）
 export const MACRO_DEFAULTS = {
   calorieFactor: {
