@@ -12,6 +12,8 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    // Claude Code local config (skills/workflows are not project code)
+    ".claude/**",
   ]),
 ]);
 
