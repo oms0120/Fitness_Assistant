@@ -14,6 +14,15 @@ export default function BmrPage() {
   const [result, setResult] = useState<{ bmr: number; tdee: number } | null>(null);
   const [errors, setErrors] = useState<Record<string, string>>({});
 
+  async function saveResult(bmr: number, tdee: number) {
+    const res = await fetch("/api/logs", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ type: "bmr", data: { bmr, tdee, sex, weightKg, heightCm, age, activity } }),
+    });
+    if (res.status === 401) return; // 未登录静默跳过
+  }
+
   function onSubmit(e: React.FormEvent) {
     e.preventDefault();
     const bmrRes = calculateBmr({ sex, weightKg: Number(weightKg), heightCm: Number(heightCm), age: Number(age) });
@@ -30,6 +39,7 @@ export default function BmrPage() {
     }
     setErrors({});
     setResult({ bmr: bmrRes.data.bmr, tdee: tdeeRes.data.tdee });
+    void saveResult(bmrRes.data.bmr, tdeeRes.data.tdee);
   }
 
   return (
