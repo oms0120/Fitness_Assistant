@@ -4,11 +4,26 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { planTemplates } from "@/lib/data/plans";
 import { exercises } from "@/lib/data/exercises";
-import { MUSCLE_GROUP_LABELS, type MuscleGroup, type PlanDay } from "@/lib/data/types";
+import { MUSCLE_GROUP_LABELS, DIFFICULTY_LABELS, type MuscleGroup, type PlanDay } from "@/lib/data/types";
+import type { PlanSuggestion } from "@/lib/ai/types";
+
+const LEVELS = [
+  { key: "beginner", label: DIFFICULTY_LABELS.beginner },
+  { key: "intermediate", label: DIFFICULTY_LABELS.intermediate },
+  { key: "advanced", label: DIFFICULTY_LABELS.advanced },
+] as const;
+
+const EQUIPMENT_OPTIONS = ["不限", "杠铃", "哑铃", "器械", "自重"] as const;
 
 export function PlansClient({ authenticated }: { authenticated: boolean }) {
   const [days, setDays] = useState<PlanDay[]>(planTemplates);
   const [active, setActive] = useState(0);
+
+  const [level, setLevel] = useState<"beginner" | "intermediate" | "advanced">("beginner");
+  const [equipment, setEquipment] = useState<string>("不限");
+  const [aiPlan, setAiPlan] = useState<PlanSuggestion | null>(null);
+  const [aiLoading, setAiLoading] = useState(false);
+  const [aiError, setAiError] = useState("");
 
   useEffect(() => {
     if (!authenticated) return;
@@ -72,6 +87,31 @@ export function PlansClient({ authenticated }: { authenticated: boolean }) {
 
   function reset() {
     mutate(() => planTemplates);
+  }
+
+  async function onAiPlan() {
+    if (!day) return;
+    setAiError("");
+    setAiLoading(true);
+    try {
+      const res = await fetch("/api/ai/plan", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ muscleGroup: day.muscleGroup, level, equipment }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setAiError(data.error ?? "AI 生成失败，请稍后重试");
+        setAiPlan(null);
+        return;
+      }
+      setAiPlan(data.plan ?? null);
+    } catch {
+      setAiError("AI 生成失败，请稍后重试");
+      setAiPlan(null);
+    } finally {
+      setAiLoading(false);
+    }
   }
 
   return (
@@ -149,6 +189,66 @@ export function PlansClient({ authenticated }: { authenticated: boolean }) {
           )}
         </div>
       )}
+
+      {authenticated && (
+        <div className="mt-6 rounded-xl border border-zinc-200 p-5 dark:border-zinc-800">
+          <div className="mb-3 text-sm font-medium text-zinc-700 dark:text-zinc-300">AI 生成计划</div>
+          <div className="mb-3 flex flex-wrap gap-2">
+            {LEVELS.map((l) => (
+              <button
+                key={l.key}
+                type="button"
+                onClick={() => setLevel(l.key)}
+                className={`rounded-lg px-4 py-2 text-sm ${level === l.key ? "bg-zinc-900 text-white dark:bg-white dark:text-black" : "border border-zinc-300 dark:border-zinc-700"}`}
+              >
+                {l.label}
+              </button>
+            ))}
+            <select
+              value={equipment}
+              onChange={(e) => setEquipment(e.target.value)}
+              className="rounded-lg border border-zinc-300 px-3 py-2 text-sm dark:border-zinc-700 dark:bg-zinc-900"
+            >
+              {EQUIPMENT_OPTIONS.map((o) => (
+                <option key={o} value={o}>{o}</option>
+              ))}
+            </select>
+            <button
+              type="button"
+              onClick={onAiPlan}
+              disabled={aiLoading}
+              className="rounded-lg bg-zinc-900 px-4 py-2 text-sm text-white disabled:opacity-50 dark:bg-white dark:text-black"
+            >
+              {aiLoading ? "生成中…" : "AI 生成计划"}
+            </button>
+          </div>
+
+          {aiError && (
+            <p className="text-sm text-amber-600 dark:text-amber-400">{aiError}</p>
+          )}
+
+          {aiPlan && (
+            <div className="mt-4">
+              <div className="mb-2 text-xs text-zinc-500">AI 生成，仅供参考</div>
+              <div className="rounded-lg bg-zinc-50 p-4 dark:bg-zinc-900">
+                <div className="flex items-center justify-between">
+                  <div className="font-medium">{aiPlan.name}</div>
+                  <div className="text-sm text-zinc-500">{aiPlan.goal}</div>
+                </div>
+                <div className="mt-3 space-y-2">
+                  {aiPlan.exercises.map((ex, i) => (
+                    <div key={`${ex.name}-${i}`} className="flex items-center justify-between text-sm">
+                      <div className="text-zinc-700 dark:text-zinc-300">{ex.name}</div>
+                      <div className="text-zinc-500">{ex.sets} 组 × {ex.reps} 次</div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
       {authenticated && <p className="mt-6 text-xs text-zinc-400">调整会自动保存到云端，多端同步。</p>}
     </div>
   );

@@ -6,6 +6,7 @@ import { matchRecipesByCalories } from "@/lib/mealMatching";
 import { findMealPlan } from "@/lib/mealPlanMatching";
 import type { MealPlanResult } from "@/lib/mealPlanMatching";
 import type { Recipe } from "@/lib/data/types";
+import type { RecipeSuggestion } from "@/lib/ai/types";
 
 const CATS = [
   { key: "cut", label: "减脂" },
@@ -53,6 +54,27 @@ function MealCard({ label, r }: { label: string; r: Recipe }) {
   );
 }
 
+function AiRecipeCard({ s }: { s: RecipeSuggestion }) {
+  return (
+    <div className="rounded-xl border border-zinc-200 p-5 dark:border-zinc-800">
+      <div className="flex items-center justify-between">
+        <div className="font-medium">{s.name}</div>
+        <div className="text-sm text-zinc-500">{s.calories} kcal</div>
+      </div>
+      <div className="mt-2 flex gap-4 text-sm text-zinc-600 dark:text-zinc-400">
+        <span>蛋白 {s.proteinG}g</span>
+        <span>碳水 {s.carbsG}g</span>
+        <span>脂肪 {s.fatG}g</span>
+      </div>
+      <div className="mt-3 text-xs text-zinc-500">
+        <div>食材：{s.ingredients.join("、")}</div>
+        <div className="mt-1">做法：{s.steps.join("；")}</div>
+      </div>
+      <div className="mt-3 text-xs text-zinc-400">{s.reason}</div>
+    </div>
+  );
+}
+
 export function MealsClient() {
   const [cat, setCat] = useState<"cut" | "bulk" | "balanced">("cut");
   const [target, setTarget] = useState("");
@@ -65,6 +87,10 @@ export function MealsClient() {
   const [fatPct, setFatPct] = useState(20);
   const [mealPlan, setMealPlan] = useState<MealPlanResult | null>(null);
   const [planError, setPlanError] = useState("");
+
+  const [aiSuggestions, setAiSuggestions] = useState<RecipeSuggestion[] | null>(null);
+  const [aiLoading, setAiLoading] = useState(false);
+  const [aiError, setAiError] = useState("");
 
   function onPlanGoalChange(g: "cut" | "bulk" | "maintain") {
     setPlanGoal(g);
@@ -98,6 +124,34 @@ export function MealsClient() {
       setMatched(matchRecipesByCalories(kcal, 0.1));
     } else {
       setMatched(null);
+    }
+  }
+
+  async function onAiRecommend() {
+    const kcal = Number(planCalories);
+    if (!Number.isFinite(kcal) || kcal <= 0) return;
+    const sum = carbPct + proteinPct + fatPct;
+    if (sum <= 0) return;
+    setAiError("");
+    setAiLoading(true);
+    try {
+      const res = await fetch("/api/ai/recipes", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ targetCalories: kcal, proteinRatio: proteinPct / sum, carbRatio: carbPct / sum, fatRatio: fatPct / sum, goal: planGoal }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setAiError(data.error ?? "AI 生成失败，请稍后重试");
+        setAiSuggestions(null);
+        return;
+      }
+      setAiSuggestions(data.suggestions ?? []);
+    } catch {
+      setAiError("AI 生成失败，请稍后重试");
+      setAiSuggestions(null);
+    } finally {
+      setAiLoading(false);
     }
   }
 
@@ -177,10 +231,33 @@ export function MealsClient() {
         </div>
         <div className="mb-3 text-xs text-zinc-400">* 三个比例提交时会自动归一化为 100%。</div>
 
-        <button type="submit" className="rounded-lg bg-zinc-900 px-4 py-2 text-white dark:bg-white dark:text-black">生成配餐方案</button>
+        <div className="flex flex-wrap gap-2">
+          <button type="submit" className="rounded-lg bg-zinc-900 px-4 py-2 text-white dark:bg-white dark:text-black">生成配餐方案</button>
+          <button
+            type="button"
+            onClick={onAiRecommend}
+            disabled={aiLoading}
+            className="rounded-lg border border-zinc-300 px-4 py-2 text-sm disabled:opacity-50 dark:border-zinc-700"
+          >
+            {aiLoading ? "生成中…" : "AI 推荐菜谱"}
+          </button>
+        </div>
 
         {planError && (
           <p className="mt-3 text-sm text-amber-600 dark:text-amber-400">{planError}</p>
+        )}
+
+        {aiError && (
+          <p className="mt-3 text-sm text-amber-600 dark:text-amber-400">{aiError}</p>
+        )}
+
+        {aiSuggestions && aiSuggestions.length > 0 && (
+          <div className="mt-4">
+            <div className="mb-2 text-xs text-zinc-500">AI 推荐菜谱（AI 生成，仅供参考）</div>
+            <div className="grid gap-3">
+              {aiSuggestions.map((s, i) => <AiRecipeCard key={`${s.name}-${i}`} s={s} />)}
+            </div>
+          </div>
         )}
 
         {mealPlan && (
