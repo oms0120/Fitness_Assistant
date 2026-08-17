@@ -20,7 +20,7 @@ export default function RegisterPage() {
     });
     const data = await res.json();
     if (!res.ok) {
-      setError(data.error ?? "注册失败");
+      setError(data.error ?? Object.values(data.errors ?? {})[0] ?? "注册失败");
       return;
     }
     router.push("/login");

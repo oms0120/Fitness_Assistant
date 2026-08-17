@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import bcrypt from "bcryptjs";
 import { z } from "zod";
+import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db/prisma";
 
 const registerSchema = z.object({
@@ -21,13 +22,21 @@ export async function POST(req: Request) {
     return NextResponse.json({ errors }, { status: 400 });
   }
   const { email, password } = parsed.data;
+  const normalizedEmail = email.toLowerCase();
 
-  const existing = await prisma.user.findUnique({ where: { email } });
+  const existing = await prisma.user.findUnique({ where: { email: normalizedEmail } });
   if (existing) {
     return NextResponse.json({ error: "该邮箱已注册" }, { status: 409 });
   }
 
   const passwordHash = await bcrypt.hash(password, 10);
-  await prisma.user.create({ data: { email, passwordHash } });
+  try {
+    await prisma.user.create({ data: { email: normalizedEmail, passwordHash } });
+  } catch (e) {
+    if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === "P2002") {
+      return NextResponse.json({ error: "该邮箱已注册" }, { status: 409 });
+    }
+    throw e;
+  }
   return NextResponse.json({ ok: true });
 }

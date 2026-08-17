@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
-import { auth } from "@/auth";
+import { auth, signOut } from "@/auth";
 import Link from "next/link";
 import "./globals.css";
 
@@ -35,6 +35,14 @@ async function Nav() {
               <Link href="/profile" className="text-zinc-600 dark:text-zinc-400">档案</Link>
               <Link href="/history" className="text-zinc-600 dark:text-zinc-400">历史</Link>
               <span className="text-zinc-500">{session.user?.email ?? ""}</span>
+              <form
+                action={async () => {
+                  "use server";
+                  await signOut({ redirectTo: "/login" });
+                }}
+              >
+                <button type="submit" className="text-zinc-600 dark:text-zinc-400">退出</button>
+              </form>
             </>
           ) : (
             <Link href="/login" className="text-zinc-600 dark:text-zinc-400">登录</Link>
