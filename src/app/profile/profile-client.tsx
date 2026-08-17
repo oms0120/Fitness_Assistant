@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { calculateBmr, calculateTdee, ActivityLevel, ACTIVITY_LEVEL_LABELS } from "@/lib/calculators";
 import { NumberField } from "@/components/calculators/NumberField";
@@ -17,6 +17,25 @@ export function ProfileClient() {
   const [goal, setGoal] = useState("cut");
   const [activity, setActivity] = useState<ActivityLevel>(ActivityLevel.MODERATE);
   const [msg, setMsg] = useState("");
+
+  useEffect(() => {
+    (async () => {
+      const res = await fetch("/api/profile");
+      if (!res.ok) return;
+      const data = await res.json();
+      const p = data.profiles?.[0];
+      if (!p) return;
+      setSex(p.sex);
+      setHeightCm(String(p.heightCm));
+      setWeightKg(String(p.weightKg));
+      setNeckCm(String(p.neckCm));
+      setWaistCm(String(p.waistCm));
+      if (p.hipCm != null) setHipCm(String(p.hipCm));
+      setAge(String(p.age));
+      setGoal(p.goal);
+      setActivity(p.activity);
+    })();
+  }, []);
 
   const h = Number(heightCm);
   const w = Number(weightKg);
