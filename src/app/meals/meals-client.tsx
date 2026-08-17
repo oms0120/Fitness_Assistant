@@ -64,6 +64,7 @@ export function MealsClient() {
   const [proteinPct, setProteinPct] = useState(40);
   const [fatPct, setFatPct] = useState(20);
   const [mealPlan, setMealPlan] = useState<MealPlanResult | null>(null);
+  const [planError, setPlanError] = useState("");
 
   function onPlanGoalChange(g: "cut" | "bulk" | "maintain") {
     setPlanGoal(g);
@@ -75,10 +76,11 @@ export function MealsClient() {
 
   function onPlanSubmit(e: React.FormEvent) {
     e.preventDefault();
+    setPlanError("");
     const kcal = Number(planCalories);
-    if (!Number.isFinite(kcal) || kcal <= 0) return;
+    if (!Number.isFinite(kcal) || kcal <= 0) { setMealPlan(null); return; }
     const sum = carbPct + proteinPct + fatPct;
-    if (sum <= 0) return;
+    if (sum <= 0) { setMealPlan(null); return; }
     const result = findMealPlan({
       targetCalories: kcal,
       carbRatio: carbPct / sum,
@@ -86,6 +88,7 @@ export function MealsClient() {
       fatRatio: fatPct / sum,
     });
     setMealPlan(result);
+    if (!result) setPlanError("未找到合适组合，请调整热量或比例");
   }
 
   function onMatch(e: React.FormEvent) {
@@ -175,6 +178,10 @@ export function MealsClient() {
         <div className="mb-3 text-xs text-zinc-400">* 三个比例提交时会自动归一化为 100%。</div>
 
         <button type="submit" className="rounded-lg bg-zinc-900 px-4 py-2 text-white dark:bg-white dark:text-black">生成配餐方案</button>
+
+        {planError && (
+          <p className="mt-3 text-sm text-amber-600 dark:text-amber-400">{planError}</p>
+        )}
 
         {mealPlan && (
           <div className="mt-4">
