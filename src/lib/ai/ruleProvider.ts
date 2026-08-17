@@ -3,8 +3,9 @@ import { recipes } from "@/lib/data/recipes";
 import { planTemplates } from "@/lib/data/plans";
 import { exercises } from "@/lib/data/exercises";
 import { findMealPlan } from "@/lib/mealPlanMatching";
+import type { AiProvider } from "./provider";
 
-export class RuleProvider {
+export class RuleProvider implements AiProvider {
   async recommendRecipes(input: RecipeRequest): Promise<RecipeSuggestion[]> {
     // 复用组合配餐算法找最优 3 餐，转成建议
     const plan = findMealPlan({

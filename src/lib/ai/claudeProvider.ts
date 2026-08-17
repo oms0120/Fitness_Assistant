@@ -2,10 +2,11 @@ import Anthropic from "@anthropic-ai/sdk";
 import { zodOutputFormat } from "@anthropic-ai/sdk/helpers/zod";
 import type { RecipeRequest, PlanRequest, RecipeSuggestion, PlanSuggestion } from "./types";
 import { recipeSuggestionsSchema, planSuggestionSchema } from "./types";
+import type { AiProvider } from "./provider";
 
 const client = new Anthropic(); // 从 ANTHROPIC_API_KEY 环境变量读
 
-export class ClaudeProvider {
+export class ClaudeProvider implements AiProvider {
   async recommendRecipes(input: RecipeRequest): Promise<RecipeSuggestion[]> {
     const response = await client.messages.parse({
       model: "claude-opus-5",
@@ -15,7 +16,10 @@ export class ClaudeProvider {
       messages: [{ role: "user", content: JSON.stringify(input) }],
       output_config: { format: zodOutputFormat(recipeSuggestionsSchema) },
     });
-    return response.parsed_output?.suggestions ?? [];
+    if (!response.parsed_output) {
+      throw new Error("AI 菜谱推荐失败");
+    }
+    return response.parsed_output.suggestions;
   }
 
   async generatePlan(input: PlanRequest): Promise<PlanSuggestion> {
