@@ -1,6 +1,7 @@
 import { auth } from "@/auth";
 import { redirect } from "next/navigation";
 import { prisma } from "@/lib/db/prisma";
+import { formatLogData } from "@/lib/logFormat";
 
 const TYPE_LABELS: Record<string, string> = {
   bmr: "BMR/TDEE",
@@ -30,7 +31,7 @@ export default async function HistoryPage() {
             <div key={l.id} className="flex items-center justify-between rounded-xl border border-zinc-200 p-4 dark:border-zinc-800">
               <div>
                 <div className="font-medium">{TYPE_LABELS[l.type] ?? l.type}</div>
-                <div className="mt-1 font-mono text-xs text-zinc-500">{l.data}</div>
+                <div className="mt-1 font-mono text-xs text-zinc-500">{formatLogData(l.type, l.data)}</div>
               </div>
               <div className="text-xs text-zinc-500">{new Date(l.createdAt).toLocaleString("zh-CN")}</div>
             </div>
