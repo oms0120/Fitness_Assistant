@@ -1,85 +1,95 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import Link from "next/link";
 import { planTemplates } from "@/lib/data/plans";
 import { exercises } from "@/lib/data/exercises";
 import { MUSCLE_GROUP_LABELS, type MuscleGroup, type PlanDay } from "@/lib/data/types";
 
-const STORAGE_KEY = "training-plans-v1";
-
-function loadPlans(): PlanDay[] {
-  if (typeof window === "undefined") return planTemplates;
-  const raw = window.localStorage.getItem(STORAGE_KEY);
-  if (!raw) return planTemplates;
-  try {
-    const parsed = JSON.parse(raw);
-    if (Array.isArray(parsed) && parsed.every((d) => d && Array.isArray(d.exercises))) {
-      return parsed as PlanDay[];
-    }
-    return planTemplates;
-  } catch {
-    return planTemplates;
-  }
-}
-
-export function PlansClient() {
+export function PlansClient({ authenticated }: { authenticated: boolean }) {
   const [days, setDays] = useState<PlanDay[]>(planTemplates);
   const [active, setActive] = useState(0);
-  const [hydrated, setHydrated] = useState(false);
 
   useEffect(() => {
-    // Read persisted plans from localStorage after hydration (SSR-safe).
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    setDays(loadPlans());
-    setHydrated(true);
-  }, []);
-
-  useEffect(() => {
-    if (hydrated) window.localStorage.setItem(STORAGE_KEY, JSON.stringify(days));
-  }, [days, hydrated]);
+    if (!authenticated) return;
+    (async () => {
+      try {
+        const res = await fetch("/api/training-plan");
+        if (res.ok) {
+          const data = await res.json();
+          if (Array.isArray(data.plan)) setDays(data.plan);
+        }
+      } catch {
+        // 网络异常时保留默认模板
+      }
+    })();
+  }, [authenticated]);
 
   const day = days[active];
   const exerciseById = new Map(exercises.map((e) => [e.id, e]));
 
+  function mutate(fn: (prev: PlanDay[]) => PlanDay[]) {
+    setDays((prev) => {
+      const next = fn(prev);
+      if (authenticated) {
+        fetch("/api/training-plan", {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ data: next }),
+        }).catch(() => {});
+      }
+      return next;
+    });
+  }
+
   function updateSets(reps: number, idx: number) {
-    setDays((prev) => prev.map((d, i) => i !== active ? d : {
+    mutate((prev) => prev.map((d, i) => i !== active ? d : {
       ...d,
       exercises: d.exercises.map((pe, j) => j !== idx ? pe : { ...pe, sets: reps }),
     }));
   }
 
   function updateReps(reps: number, idx: number) {
-    setDays((prev) => prev.map((d, i) => i !== active ? d : {
+    mutate((prev) => prev.map((d, i) => i !== active ? d : {
       ...d,
       exercises: d.exercises.map((pe, j) => j !== idx ? pe : { ...pe, reps }),
     }));
   }
 
   function removeExercise(idx: number) {
-    setDays((prev) => prev.map((d, i) => i !== active ? d : {
+    mutate((prev) => prev.map((d, i) => i !== active ? d : {
       ...d,
       exercises: d.exercises.filter((_, j) => j !== idx),
     }));
   }
 
   function addExercise(exerciseId: string) {
-    setDays((prev) => prev.map((d, i) => i !== active ? d : {
+    mutate((prev) => prev.map((d, i) => i !== active ? d : {
       ...d,
       exercises: [...d.exercises, { exerciseId, sets: 3, reps: 10 }],
     }));
   }
 
   function reset() {
-    window.localStorage.removeItem(STORAGE_KEY);
-    setDays(planTemplates);
+    mutate(() => planTemplates);
   }
 
   return (
     <div className="mx-auto max-w-4xl px-6 py-12">
       <div className="mb-6 flex items-center justify-between">
         <h1 className="text-3xl font-semibold">训练计划</h1>
-        <button onClick={reset} className="rounded-lg border border-zinc-300 px-4 py-2 text-sm dark:border-zinc-700">重置为默认</button>
+        {authenticated ? (
+          <button onClick={reset} className="rounded-lg border border-zinc-300 px-4 py-2 text-sm dark:border-zinc-700">重置为默认</button>
+        ) : (
+          <Link href="/login" className="rounded-lg bg-zinc-900 px-4 py-2 text-sm text-white dark:bg-white dark:text-black">登录后编辑</Link>
+        )}
       </div>
+
+      {!authenticated && (
+        <p className="mb-6 rounded-lg bg-zinc-100 px-4 py-3 text-sm text-zinc-600 dark:bg-zinc-900 dark:text-zinc-400">
+          当前为只读预设模板，<Link href="/login" className="underline">登录</Link>后可编辑并同步到云端。
+        </p>
+      )}
 
       <div className="mb-6 flex gap-2">
         {days.map((d, i) => (
@@ -106,38 +116,40 @@ export function PlansClient() {
                 <div className="flex items-center gap-3">
                   <label className="flex items-center gap-1 text-sm">
                     组数
-                    <input type="number" min={1} value={pe.sets} onChange={(e) => updateSets(Math.max(1, Number(e.target.value) || 1), idx)} className="w-14 rounded border border-zinc-300 px-2 py-1 dark:border-zinc-700 dark:bg-zinc-900" />
+                    <input type="number" min={1} disabled={!authenticated} value={pe.sets} onChange={(e) => updateSets(Math.max(1, Number(e.target.value) || 1), idx)} className="w-14 rounded border border-zinc-300 px-2 py-1 disabled:opacity-50 dark:border-zinc-700 dark:bg-zinc-900" />
                   </label>
                   <label className="flex items-center gap-1 text-sm">
                     次数
-                    <input type="number" min={1} value={pe.reps} onChange={(e) => updateReps(Math.max(1, Number(e.target.value) || 1), idx)} className="w-14 rounded border border-zinc-300 px-2 py-1 dark:border-zinc-700 dark:bg-zinc-900" />
+                    <input type="number" min={1} disabled={!authenticated} value={pe.reps} onChange={(e) => updateReps(Math.max(1, Number(e.target.value) || 1), idx)} className="w-14 rounded border border-zinc-300 px-2 py-1 disabled:opacity-50 dark:border-zinc-700 dark:bg-zinc-900" />
                   </label>
-                  <button onClick={() => removeExercise(idx)} className="text-sm text-red-500">删除</button>
+                  {authenticated && <button onClick={() => removeExercise(idx)} className="text-sm text-red-500">删除</button>}
                 </div>
               </div>
             );
           })}
 
-          <div className="rounded-xl border border-dashed border-zinc-300 p-4 dark:border-zinc-700">
-            <label className="mb-2 block text-sm font-medium">添加动作</label>
-            <select
-              onChange={(e) => { if (e.target.value) addExercise(e.target.value); e.target.value = ""; }}
-              defaultValue=""
-              className="w-full rounded-lg border border-zinc-300 px-3 py-2 dark:border-zinc-700 dark:bg-zinc-900"
-            >
-              <option value="" disabled>选择动作…</option>
-              {(Object.keys(MUSCLE_GROUP_LABELS) as MuscleGroup[]).map((group) => (
-                <optgroup key={group} label={MUSCLE_GROUP_LABELS[group]}>
-                  {exercises.filter((e) => e.muscleGroup === group).map((e) => (
-                    <option key={e.id} value={e.id}>{e.name}（{MUSCLE_GROUP_LABELS[e.muscleGroup]}）</option>
-                  ))}
-                </optgroup>
-              ))}
-            </select>
-          </div>
+          {authenticated && (
+            <div className="rounded-xl border border-dashed border-zinc-300 p-4 dark:border-zinc-700">
+              <label className="mb-2 block text-sm font-medium">添加动作</label>
+              <select
+                onChange={(e) => { if (e.target.value) addExercise(e.target.value); e.target.value = ""; }}
+                defaultValue=""
+                className="w-full rounded-lg border border-zinc-300 px-3 py-2 dark:border-zinc-700 dark:bg-zinc-900"
+              >
+                <option value="" disabled>选择动作…</option>
+                {(Object.keys(MUSCLE_GROUP_LABELS) as MuscleGroup[]).map((group) => (
+                  <optgroup key={group} label={MUSCLE_GROUP_LABELS[group]}>
+                    {exercises.filter((e) => e.muscleGroup === group).map((e) => (
+                      <option key={e.id} value={e.id}>{e.name}（{MUSCLE_GROUP_LABELS[e.muscleGroup]}）</option>
+                    ))}
+                  </optgroup>
+                ))}
+              </select>
+            </div>
+          )}
         </div>
       )}
-      <p className="mt-6 text-xs text-zinc-400">计划自动保存到本地浏览器，重置可恢复默认模板。</p>
+      {authenticated && <p className="mt-6 text-xs text-zinc-400">调整会自动保存到云端，多端同步。</p>}
     </div>
   );
 }
