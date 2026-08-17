@@ -3,6 +3,8 @@
 import { useState } from "react";
 import { recipes } from "@/lib/data/recipes";
 import { matchRecipesByCalories } from "@/lib/mealMatching";
+import { findMealPlan } from "@/lib/mealPlanMatching";
+import type { MealPlanResult } from "@/lib/mealPlanMatching";
 import type { Recipe } from "@/lib/data/types";
 
 const CATS = [
@@ -10,6 +12,12 @@ const CATS = [
   { key: "bulk", label: "增肌" },
   { key: "balanced", label: "均衡" },
 ] as const;
+
+const MACRO_PRESETS = {
+  cut: { label: "减脂", carb: 0.4, protein: 0.4, fat: 0.2 },
+  bulk: { label: "增肌", carb: 0.5, protein: 0.3, fat: 0.2 },
+  maintain: { label: "维持", carb: 0.45, protein: 0.3, fat: 0.25 },
+} as const;
 
 function RecipeCard({ r }: { r: Recipe }) {
   return (
@@ -36,10 +44,49 @@ function RecipeCard({ r }: { r: Recipe }) {
   );
 }
 
+function MealCard({ label, r }: { label: string; r: Recipe }) {
+  return (
+    <div>
+      <div className="mb-2 text-sm font-medium text-zinc-700 dark:text-zinc-300">{label}</div>
+      <RecipeCard r={r} />
+    </div>
+  );
+}
+
 export function MealsClient() {
   const [cat, setCat] = useState<"cut" | "bulk" | "balanced">("cut");
   const [target, setTarget] = useState("");
   const [matched, setMatched] = useState<Recipe[] | null>(null);
+
+  const [planGoal, setPlanGoal] = useState<"cut" | "bulk" | "maintain">("cut");
+  const [planCalories, setPlanCalories] = useState("");
+  const [carbPct, setCarbPct] = useState(40);
+  const [proteinPct, setProteinPct] = useState(40);
+  const [fatPct, setFatPct] = useState(20);
+  const [mealPlan, setMealPlan] = useState<MealPlanResult | null>(null);
+
+  function onPlanGoalChange(g: "cut" | "bulk" | "maintain") {
+    setPlanGoal(g);
+    const p = MACRO_PRESETS[g];
+    setCarbPct(Math.round(p.carb * 100));
+    setProteinPct(Math.round(p.protein * 100));
+    setFatPct(Math.round(p.fat * 100));
+  }
+
+  function onPlanSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    const kcal = Number(planCalories);
+    if (!Number.isFinite(kcal) || kcal <= 0) return;
+    const sum = carbPct + proteinPct + fatPct;
+    if (sum <= 0) return;
+    const result = findMealPlan({
+      targetCalories: kcal,
+      carbRatio: carbPct / sum,
+      proteinRatio: proteinPct / sum,
+      fatRatio: fatPct / sum,
+    });
+    setMealPlan(result);
+  }
 
   function onMatch(e: React.FormEvent) {
     e.preventDefault();
@@ -74,6 +121,77 @@ export function MealsClient() {
             <div className="mb-2 text-xs text-zinc-500">匹配结果（±10%，按热量差排序）</div>
             <div className="grid gap-3">
               {matched.map((r) => <RecipeCard key={r.id} r={r} />)}
+            </div>
+          </div>
+        )}
+      </form>
+
+      <form onSubmit={onPlanSubmit} className="mb-8 rounded-xl border border-zinc-200 p-5 dark:border-zinc-800">
+        <div className="mb-3 text-sm font-medium text-zinc-700 dark:text-zinc-300">组合配餐</div>
+
+        <div className="mb-3 flex gap-2">
+          {(Object.keys(MACRO_PRESETS) as Array<"cut" | "bulk" | "maintain">).map((g) => (
+            <button
+              key={g}
+              type="button"
+              onClick={() => onPlanGoalChange(g)}
+              className={`rounded-lg px-4 py-2 text-sm ${planGoal === g ? "bg-zinc-900 text-white dark:bg-white dark:text-black" : "border border-zinc-300 dark:border-zinc-700"}`}
+            >
+              {MACRO_PRESETS[g].label}
+            </button>
+          ))}
+        </div>
+
+        <div className="mb-3">
+          <input
+            type="number"
+            value={planCalories}
+            onChange={(e) => setPlanCalories(e.target.value)}
+            placeholder="输入目标热量（kcal）"
+            className="w-full rounded-lg border border-zinc-300 px-3 py-2 dark:border-zinc-700 dark:bg-zinc-900"
+          />
+        </div>
+
+        <div className="mb-3 grid grid-cols-3 gap-2">
+          {(
+            [
+              { label: "碳水 %", value: carbPct, set: setCarbPct },
+              { label: "蛋白 %", value: proteinPct, set: setProteinPct },
+              { label: "脂肪 %", value: fatPct, set: setFatPct },
+            ] as const
+          ).map((f) => (
+            <label key={f.label} className="text-xs text-zinc-500">
+              <span className="mb-1 block">{f.label}</span>
+              <input
+                type="number"
+                min={0}
+                value={f.value}
+                onChange={(e) => f.set(Number(e.target.value))}
+                className="w-full rounded-lg border border-zinc-300 px-3 py-2 dark:border-zinc-700 dark:bg-zinc-900"
+              />
+            </label>
+          ))}
+        </div>
+        <div className="mb-3 text-xs text-zinc-400">* 三个比例提交时会自动归一化为 100%。</div>
+
+        <button type="submit" className="rounded-lg bg-zinc-900 px-4 py-2 text-white dark:bg-white dark:text-black">生成配餐方案</button>
+
+        {mealPlan && (
+          <div className="mt-4">
+            <div className="mb-2 text-xs text-zinc-500">配餐结果（按目标宏量最接近组合）</div>
+            <div className="grid gap-3">
+              <MealCard label="早餐" r={mealPlan.breakfast} />
+              <MealCard label="午餐" r={mealPlan.lunch} />
+              <MealCard label="晚餐" r={mealPlan.dinner} />
+            </div>
+            <div className="mt-4 rounded-lg bg-zinc-50 p-4 dark:bg-zinc-900">
+              <div className="mb-2 text-sm font-medium text-zinc-700 dark:text-zinc-300">总计 vs 目标</div>
+              <div className="grid grid-cols-2 gap-x-6 gap-y-1 text-sm sm:grid-cols-4">
+                <div>热量 <span className="font-medium">{Math.round(mealPlan.totals.calories)}</span> / {Math.round(mealPlan.targets.calories)} kcal</div>
+                <div>蛋白 <span className="font-medium">{Math.round(mealPlan.totals.proteinG)}</span> / {Math.round(mealPlan.targets.proteinG)} g</div>
+                <div>碳水 <span className="font-medium">{Math.round(mealPlan.totals.carbsG)}</span> / {Math.round(mealPlan.targets.carbsG)} g</div>
+                <div>脂肪 <span className="font-medium">{Math.round(mealPlan.totals.fatG)}</span> / {Math.round(mealPlan.targets.fatG)} g</div>
+              </div>
             </div>
           </div>
         )}
