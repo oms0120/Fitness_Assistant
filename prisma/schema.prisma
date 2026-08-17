@@ -8,12 +8,13 @@ datasource db {
 }
 
 model User {
-  id           String    @id @default(cuid())
-  email        String    @unique
+  id           String         @id @default(cuid())
+  email        String         @unique
   passwordHash String
+  trainingPlan TrainingPlan?
   profiles     Profile[]
   logs         Log[]
-  createdAt    DateTime  @default(now())
+  createdAt    DateTime       @default(now())
 }
 
 model Profile {
@@ -38,5 +39,13 @@ model Log {
   type      String
   data      String
   createdAt DateTime @default(now())
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model TrainingPlan {
+  id        String   @id @default(cuid())
+  userId    String   @unique
+  data      String
+  updatedAt DateTime @updatedAt
   user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 }
