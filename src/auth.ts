@@ -1,4 +1,4 @@
-import NextAuth from "next-auth";
+import NextAuth, { DefaultSession } from "next-auth";
 import Credentials from "next-auth/providers/credentials";
 import bcrypt from "bcryptjs";
 import { prisma } from "@/lib/db/prisma";
@@ -7,8 +7,7 @@ declare module "next-auth" {
   interface Session {
     user: {
       id: string;
-      email: string;
-    };
+    } & DefaultSession["user"];
   }
 }
 

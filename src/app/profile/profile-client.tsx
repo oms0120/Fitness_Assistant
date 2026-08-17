@@ -17,13 +17,16 @@ export function ProfileClient() {
   const [goal, setGoal] = useState("cut");
   const [activity, setActivity] = useState<ActivityLevel>(ActivityLevel.MODERATE);
   const [msg, setMsg] = useState("");
-  const [preview, setPreview] = useState<string | null>(null);
 
-  function onBmrPreview() {
-    const r = calculateBmr({ sex, weightKg: Number(weightKg), heightCm: Number(heightCm), age: Number(age) });
+  const h = Number(heightCm);
+  const w = Number(weightKg);
+  const a = Number(age);
+  let preview: string | null = null;
+  if (heightCm && weightKg && age && Number.isFinite(h) && Number.isFinite(w) && Number.isFinite(a)) {
+    const r = calculateBmr({ sex, weightKg: w, heightCm: h, age: a });
     if (r.ok) {
       const t = calculateTdee({ bmr: r.data.bmr, activityLevel: activity });
-      setPreview(`BMR ${r.data.bmr.toFixed(0)} kcal · TDEE ${t.ok ? t.data.tdee.toFixed(0) : "-"} kcal`);
+      preview = `BMR ${r.data.bmr.toFixed(0)} kcal · TDEE ${t.ok ? t.data.tdee.toFixed(0) : "-"} kcal`;
     }
   }
 
@@ -36,7 +39,7 @@ export function ProfileClient() {
       body: JSON.stringify({
         sex, heightCm: Number(heightCm), weightKg: Number(weightKg),
         neckCm: Number(neckCm), waistCm: Number(waistCm),
-        hipCm: sex === "female" ? Number(hipCm) : undefined,
+        hipCm: sex === "female" && hipCm ? Number(hipCm) : undefined,
         age: Number(age), goal, activity,
       }),
     });
