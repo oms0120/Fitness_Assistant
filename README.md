@@ -1,36 +1,48 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# 智能健身助手
 
-## Getting Started
+一个基于 Web 的智能健身助手，覆盖身体代谢计算、体脂测量、营养方案、膳食推荐与训练计划。
 
-First, run the development server:
+## 功能
+
+- **计算器**：基础代谢（BMR）/ 每日总代谢（TDEE）、美国海军体脂率、宏量营养（减脂/增肌/维持，含高级设置）、FFMI、1RM
+- **动作库**：胸 / 肩 / 背 / 腿 / 臂动作，按部位筛选
+- **训练计划**：分部位预设模板，可改组数/次数、增删动作，登录后云端同步
+- **菜谱库**：减脂/增肌/均衡分类浏览、按热量匹配单食谱、组合配餐（早/午/晚 3 餐），支持 AI 推荐
+- **账户**：注册/登录、身体档案、计算历史记录
+
+## 技术栈
+
+- Next.js 16 (App Router) + React 19 + TypeScript
+- Tailwind CSS v4 + shadcn/ui
+- Prisma + SQLite
+- Auth.js v5（邮箱密码 + JWT session）
+- `@anthropic-ai/sdk`（可选 AI 增强，`claude-opus-5`，未配 key 时回退规则库）
+- Vitest
+
+## 快速开始
 
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+npm install
+cp .env.example .env        # 配置 DATABASE_URL + AUTH_SECRET
+npx prisma migrate dev      # 初始化数据库
+npm run dev                 # 启动开发服务器
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+打开 http://localhost:3000
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## 环境变量
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+| 变量 | 说明 |
+|---|---|
+| `DATABASE_URL` | SQLite 文件路径（`file:./dev.db`） |
+| `AUTH_SECRET` | Auth.js 会话密钥 |
+| `AI_PROVIDER` | `rule`（默认）或 `claude`，控制 AI 增强开关 |
+| `ANTHROPIC_API_KEY` | Claude API key（可选，配了且 `AI_PROVIDER=claude` 才启用） |
 
-## Learn More
+## 测试
 
-To learn more about Next.js, take a look at the following resources:
-
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
-
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+```bash
+npm test    # 运行 Vitest 单测（32 个用例）
+npm run lint
+npm run build
+```

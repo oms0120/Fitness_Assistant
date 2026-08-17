@@ -18,7 +18,7 @@
 
 | 层 | 选型 | 理由 |
 |---|---|---|
-| 全栈框架 | **Next.js 15 (App Router) + React 19 + TypeScript** | 单代码库前后端一体、API Routes 天然提供后端、类型全栈共享，个人项目部署最省心 |
+| 全栈框架 | **Next.js 16 (App Router) + React 19 + TypeScript** | 单代码库前后端一体、API Routes 天然提供后端、类型全栈共享，个人项目部署最省心 |
 | UI | **Tailwind CSS + shadcn/ui** | 快速出成品、风格统一 |
 | 后端 | Next.js Route Handlers + Zod 校验 | 无需单独后端框架，配合 Server Actions 做表单提交 |
 | ORM | **Prisma** | schema 即文档、迁移/类型生成一体，DX 最好 |
