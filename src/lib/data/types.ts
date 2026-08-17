@@ -13,6 +13,7 @@ export interface Recipe {
   id: string;
   name: string;
   category: "cut" | "bulk" | "balanced";
+  mealType: "breakfast" | "meal";
   calories: number;
   proteinG: number;
   carbsG: number;
