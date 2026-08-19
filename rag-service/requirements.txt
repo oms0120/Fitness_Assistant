@@ -1,0 +1,6 @@
+fastapi
+uvicorn
+sentence-transformers
+rapidocr_onnxruntime
+numpy
+pypdf

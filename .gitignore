@@ -47,3 +47,7 @@ next-env.d.ts
 # sqlite
 prisma/*.db
 prisma/*.db-journal
+
+# rag service (venv + 语料/向量库本地生成，不提交)
+rag-service/.venv/
+rag-service/data/
