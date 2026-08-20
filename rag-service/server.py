@@ -1,25 +1,17 @@
-"""RAG embedding + 检索服务（FastAPI）。
+"""RAG embedding + 检索服务（FastAPI）。embedding 由本地 Ollama 的 bge-m3 提供。
 
-首次运行会从 HuggingFace 下载 bge-small-zh 模型（约 100MB）。
-国内网络可先设置环境变量：HF_ENDPOINT=https://hf-mirror.com
+前置条件见 embedding.py；向量库由 ingest.py 生成。
 """
 import os
 import sqlite3
+
 import numpy as np
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
-from sentence_transformers import SentenceTransformer
 
-# 离线模式：模型已缓存，避免加载时联网卡住（首次运行需先在线下载模型）
-os.environ.setdefault("HF_HUB_OFFLINE", "1")
-os.environ.setdefault("TRANSFORMERS_OFFLINE", "1")
+from embedding import EMBED_MODEL, EmbeddingError, embed
 
-MODEL_NAME = "BAAI/bge-small-zh-v1.5"
 DB_PATH = os.path.join(os.path.dirname(__file__), "data", "vectors.db")
-
-print(f"[rag] loading model {MODEL_NAME} ...")
-model = SentenceTransformer(MODEL_NAME)
-print("[rag] model loaded")
 
 app = FastAPI(title="fitness-rag")
 
@@ -34,16 +26,24 @@ class SearchRequest(BaseModel):
 
 
 @app.post("/embed")
-def embed(req: EmbedRequest):
-    vec = model.encode(req.text, normalize_embeddings=True).astype(np.float32)
-    return {"embedding": vec.tolist(), "dim": int(len(vec))}
+def do_embed(req: EmbedRequest):
+    try:
+        vec = embed(req.text)
+    except EmbeddingError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    return {"embedding": vec.tolist(), "dim": int(len(vec)), "model": EMBED_MODEL}
 
 
 @app.post("/search")
 def search(req: SearchRequest):
-    qvec = model.encode(req.query, normalize_embeddings=True).astype(np.float32)
     if not os.path.exists(DB_PATH):
         return {"results": [], "error": "vectors.db 不存在，请先运行 ingest.py"}
+
+    try:
+        qvec = embed(req.query)
+    except EmbeddingError as exc:
+        # 返回 200 + error，让前端按"检索不到"降级而不是整个请求失败
+        return {"results": [], "error": str(exc)}
 
     conn = sqlite3.connect(DB_PATH)
     rows = conn.execute("SELECT id, text, source, meta, embedding FROM chunks").fetchall()
@@ -51,10 +51,19 @@ def search(req: SearchRequest):
     if not rows:
         return {"results": []}
 
+    indexed_dim = len(rows[0][4]) // np.dtype(np.float32).itemsize
+    if indexed_dim != len(qvec):
+        return {
+            "results": [],
+            "error": (
+                f"向量库维度 {indexed_dim} 与当前模型 {EMBED_MODEL}（{len(qvec)} 维）不一致，"
+                "请重新运行 ingest.py 重建索引"
+            ),
+        }
+
     results = []
     for id_, text, source, meta, emb_blob in rows:
         emb = np.frombuffer(emb_blob, dtype=np.float32)
-        # normalize_embeddings=True 时，余弦相似度 = 点积
         sim = float(np.dot(qvec, emb))
         results.append({"id": id_, "text": text, "source": source, "meta": meta, "score": sim})
     results.sort(key=lambda x: -x["score"])

@@ -14,6 +14,8 @@ const eslintConfig = defineConfig([
     "next-env.d.ts",
     // Claude Code local config (skills/workflows are not project code)
     ".claude/**",
+    // Python 虚拟环境里第三方包自带的 JS（torch/sklearn 等），不是项目代码
+    "rag-service/.venv/**",
   ]),
 ]);
 

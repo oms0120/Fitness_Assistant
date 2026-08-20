@@ -1,30 +1,29 @@
-"""语料切块 + embedding + 入库（一次性脚本）。
+"""语料切块 + embedding + 入库（一次性脚本）。embedding 由本地 Ollama 的 bge-m3 提供（批量）。
 
 用法：
   .venv/Scripts/python ingest.py
 
-读取 data/*.txt（力量训练基础、膳食指南 OCR 输出），切块后 embedding 存 data/vectors.db。
+读取 data/*.txt，切块后批量 embedding 存 data/vectors.db（会重建表）。
 """
 import os
 import re
 import sqlite3
+import sys
+
 import numpy as np
-from sentence_transformers import SentenceTransformer
 
-# 离线模式：模型已缓存，避免加载时联网卡住（首次运行需先在线下载模型）
-os.environ.setdefault("HF_HUB_OFFLINE", "1")
-os.environ.setdefault("TRANSFORMERS_OFFLINE", "1")
+from embedding import EMBED_MODEL, EmbeddingError, embed_batch
 
-MODEL_NAME = "BAAI/bge-small-zh-v1.5"
 DATA_DIR = os.path.join(os.path.dirname(__file__), "data")
 DB_PATH = os.path.join(DATA_DIR, "vectors.db")
 
-CHUNK_SIZE = 400  # 每块约 400 字
+CHUNK_SIZE = 400
 OVERLAP = 50
+BATCH_SIZE = 32
 
 
 def clean(text: str) -> str:
-    """清洗：去多余空行、行尾空白、OCR 噪声（连续空行压缩）。"""
+    """清洗：压缩连续空行、合并行内空白、去空行（OCR 噪声）。"""
     text = re.sub(r"\n{3,}", "\n\n", text)
     text = re.sub(r"[ \t]+", " ", text)
     lines = [l.strip() for l in text.split("\n")]
@@ -48,10 +47,14 @@ def chunk_text(text: str, size: int = CHUNK_SIZE, overlap: int = OVERLAP) -> lis
 
 
 def main():
-    print(f"[ingest] loading model {MODEL_NAME} ...")
-    model = SentenceTransformer(MODEL_NAME)
-
     os.makedirs(DATA_DIR, exist_ok=True)
+
+    txt_files = [f for f in os.listdir(DATA_DIR) if f.endswith(".txt")]
+    if not txt_files:
+        print("[ingest] data/ 下没有 .txt 文件，请先放入语料")
+        return
+
+    print(f"[ingest] embedding 模型: {EMBED_MODEL} (Ollama)")
     conn = sqlite3.connect(DB_PATH)
     conn.execute("DROP TABLE IF EXISTS chunks")
     conn.execute(
@@ -67,12 +70,8 @@ def main():
     )
     conn.commit()
 
-    txt_files = [f for f in os.listdir(DATA_DIR) if f.endswith(".txt")]
-    if not txt_files:
-        print("[ingest] data/ 下没有 .txt 文件，请先放入语料")
-        return
-
     total = 0
+    dim = 0
     for fname in txt_files:
         path = os.path.join(DATA_DIR, fname)
         with open(path, encoding="utf-8") as f:
@@ -81,16 +80,25 @@ def main():
         chunks = chunk_text(cleaned)
         source = os.path.splitext(fname)[0]
         print(f"[ingest] {fname}: {len(chunks)} chunks")
-        for i, ch in enumerate(chunks):
-            emb = model.encode(ch, normalize_embeddings=True).astype(np.float32)
-            conn.execute(
-                "INSERT INTO chunks (text, source, meta, embedding) VALUES (?, ?, ?, ?)",
-                (ch, source, f"chunk-{i}", emb.tobytes()),
-            )
-            total += 1
-    conn.commit()
+        for i in range(0, len(chunks), BATCH_SIZE):
+            batch = chunks[i : i + BATCH_SIZE]
+            try:
+                embs = embed_batch(batch)
+            except EmbeddingError as exc:
+                conn.close()
+                sys.exit(f"[ingest] 失败: {exc}")
+            dim = len(embs[0])
+            for offset, (ch, emb) in enumerate(zip(batch, embs)):
+                conn.execute(
+                    "INSERT INTO chunks (text, source, meta, embedding) VALUES (?, ?, ?, ?)",
+                    (ch, source, f"chunk-{i + offset}", emb.tobytes()),
+                )
+                total += 1
+            if i % (BATCH_SIZE * 5) == 0:
+                print(f"[ingest] {source}: {total} chunks 已入库")
+        conn.commit()
     conn.close()
-    print(f"[ingest] done: {total} chunks -> {DB_PATH}")
+    print(f"[ingest] done: {total} chunks ({dim} 维) -> {DB_PATH}")
 
 
 if __name__ == "__main__":
