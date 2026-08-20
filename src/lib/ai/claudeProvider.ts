@@ -1,39 +1,35 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { zodOutputFormat } from "@anthropic-ai/sdk/helpers/zod";
-import type { RecipeRequest, PlanRequest, RecipeSuggestion, PlanSuggestion } from "./types";
-import { recipeSuggestionsSchema, planSuggestionSchema } from "./types";
-import type { AiProvider } from "./provider";
+import type { ChatJsonOptions, LlmBackend } from "./llm";
 
-const client = new Anthropic(); // 从 ANTHROPIC_API_KEY 环境变量读
+let client: Anthropic | null = null;
 
-export class ClaudeProvider implements AiProvider {
-  async recommendRecipes(input: RecipeRequest): Promise<RecipeSuggestion[]> {
-    const response = await client.messages.parse({
-      model: "claude-opus-5",
-      max_tokens: 16000,
-      thinking: { type: "adaptive" },
-      system: "你是注册营养师，根据用户的热量与宏量目标推荐中式家常菜谱，热量和宏量尽量贴近目标。输出 JSON。",
-      messages: [{ role: "user", content: JSON.stringify(input) }],
-      output_config: { format: zodOutputFormat(recipeSuggestionsSchema) },
-    });
-    if (!response.parsed_output) {
-      throw new Error("AI 菜谱推荐失败");
-    }
-    return response.parsed_output.suggestions;
-  }
-
-  async generatePlan(input: PlanRequest): Promise<PlanSuggestion> {
-    const response = await client.messages.parse({
-      model: "claude-opus-5",
-      max_tokens: 16000,
-      thinking: { type: "adaptive" },
-      system: "你是健身教练，根据部位、水平、器械生成训练计划。输出 JSON。",
-      messages: [{ role: "user", content: JSON.stringify(input) }],
-      output_config: { format: zodOutputFormat(planSuggestionSchema) },
-    });
-    if (!response.parsed_output) {
-      throw new Error("AI 训练计划生成失败");
-    }
-    return response.parsed_output;
-  }
+/** 延迟构造：无 ANTHROPIC_API_KEY 时 new Anthropic() 会抛，不能在模块加载期执行。 */
+function getClient(): Anthropic {
+  client ??= new Anthropic(); // 从 ANTHROPIC_API_KEY 环境变量读
+  return client;
 }
+
+/**
+ * Claude（官方 SDK）。用 messages.parse + output_config 做结构化输出，
+ * 由 API 侧保证结构，不需要像 DeepSeek 那样把 schema 塞进 prompt。
+ */
+export const claudeBackend: LlmBackend = {
+  name: "claude",
+
+  async chatJson<T>({ system, user, schema, maxTokens }: ChatJsonOptions<T>): Promise<T> {
+    const response = await getClient().messages.parse({
+      model: "claude-opus-5",
+      max_tokens: maxTokens ?? 16000,
+      thinking: { type: "adaptive" },
+      system,
+      messages: [{ role: "user", content: user }],
+      output_config: { format: zodOutputFormat(schema) },
+    });
+
+    if (!response.parsed_output) {
+      throw new Error("Claude 未返回结构化结果");
+    }
+    return schema.parse(response.parsed_output);
+  },
+};
