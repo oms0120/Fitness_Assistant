@@ -1,6 +1,7 @@
 fastapi
 uvicorn
-sentence-transformers
+sentence-transformers<5
+transformers<5
 rapidocr_onnxruntime
 numpy
 pypdf

@@ -11,6 +11,10 @@ import sqlite3
 import numpy as np
 from sentence_transformers import SentenceTransformer
 
+# 离线模式：模型已缓存，避免加载时联网卡住（首次运行需先在线下载模型）
+os.environ.setdefault("HF_HUB_OFFLINE", "1")
+os.environ.setdefault("TRANSFORMERS_OFFLINE", "1")
+
 MODEL_NAME = "BAAI/bge-small-zh-v1.5"
 DATA_DIR = os.path.join(os.path.dirname(__file__), "data")
 DB_PATH = os.path.join(DATA_DIR, "vectors.db")
