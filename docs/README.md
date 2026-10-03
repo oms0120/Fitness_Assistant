@@ -75,7 +75,7 @@ src/
   lib/
     calculators/{bmr,tdee,bodyFat,macros,ffmi,oneRm,result,types}.ts
     data/{exercises,recipes,plans,types}.ts   # 规则库
-    ai/{llm,llmProvider,deepseekProvider,claudeProvider,ruleProvider,provider,types}.ts
+    ai/{llm,prompts,llmProvider,deepseekProvider,claudeProvider,ruleProvider,provider,types}.ts
     rag/{ragClient,ragService}.ts    # RAG 客户端与问答
     db/prisma.ts                     # Prisma 单例
     mealMatching.ts  mealPlanMatching.ts  logFormat.ts  utils.ts
@@ -127,6 +127,7 @@ rag-service/                         # Python RAG 服务（独立进程）
 2. **双后端抹平能力差异**：Claude 原生保证结构，DeepSeek 仅保证合法 JSON，故 DeepSeek 分支额外做 schema 注入 + 二次校验。
 3. **三级降级**：无 key → 规则库；模型异常 → 规则库；检索服务离线 → 无上下文问答。任一依赖故障不阻断主流程。
 4. **惰性加载**：后端用动态 `import()`，未配置的厂商 SDK 不进入运行时。
+5. **prompt 集中且带版本**：菜谱、计划、RAG 三处 prompt 统一放在 `prompts.ts`（RAG 因含片段插值做成模板函数），各带 `*_PROMPT_VERSION`；版本号随调用进入错误信息，prompt 回归时可定位。
 
 ---
 

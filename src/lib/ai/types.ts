@@ -41,3 +41,9 @@ export const planSuggestionSchema = z.object({
   exercises: z.array(planExerciseSchema),
 });
 export type PlanSuggestion = z.infer<typeof planSuggestionSchema>;
+
+/** RAG 问答的模型侧返回体。含 sources 的对完整体见 `lib/rag/ragService` 的 RagAnswer。 */
+export const ragAnswerSchema = z.object({
+  answer: z.string(),
+});
+export type RagAnswerPayload = z.infer<typeof ragAnswerSchema>;

@@ -6,6 +6,8 @@ export interface ChatJsonOptions<T> {
   user: string;
   schema: z.ZodType<T>;
   maxTokens?: number;
+  /** prompts.ts 的版本常量。出错时带进错误信息，便于定位是哪版 prompt 的回归。 */
+  promptVersion?: string;
 }
 
 export interface LlmBackend {
@@ -58,13 +60,23 @@ export async function getBackend(): Promise<LlmBackend | null> {
 /**
  * 统一的结构化生成入口。rule 模式（未配任何 key）下抛错，
  * 由调用方决定是降级到规则库还是把错误抛给用户。
+ *
+ * 后端抛出的错误统一补上 prompt 版本，调用方拿到「结构不合法」时
+ * 能一眼看出是哪版 prompt 的产出。
  */
-export async function chatJson<T>(opts: ChatJsonOptions<T>): Promise<T> {
+export async function chatJson<T>({ promptVersion, ...opts }: ChatJsonOptions<T>): Promise<T> {
   const backend = await getBackend();
   if (!backend) {
     throw new Error(
       "未配置任何大模型 key（DEEPSEEK_API_KEY 或 ANTHROPIC_API_KEY），无法调用 AI",
     );
   }
-  return backend.chatJson(opts);
+  try {
+    return await backend.chatJson(opts);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    throw new Error(promptVersion ? `[prompt ${promptVersion}] ${message}` : message, {
+      cause: err,
+    });
+  }
 }

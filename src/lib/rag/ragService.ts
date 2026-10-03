@@ -1,10 +1,7 @@
-import { z } from "zod";
 import { searchChunks } from "./ragClient";
 import { chatJson, resolveMode } from "@/lib/ai/llm";
-
-const ragAnswerSchema = z.object({
-  answer: z.string(),
-});
+import { ragAnswerSchema } from "@/lib/ai/types";
+import { RAG_EMPTY_CONTEXT, RAG_PROMPT_VERSION, ragSystemPrompt } from "@/lib/ai/prompts";
 
 export interface RagAnswer {
   answer: string;
@@ -22,15 +19,13 @@ export async function askWithRag(question: string): Promise<RagAnswer> {
   const context =
     chunks.length > 0
       ? chunks.map((c) => `【${c.source}】${c.text}`).join("\n\n")
-      : "（未检索到相关文档片段）";
+      : RAG_EMPTY_CONTEXT;
 
   const answer = await chatJson({
-    system: `你是健身营养助手。请只根据下面提供的文档片段回答用户问题，不要编造文档外的内容；若片段不足以回答，请如实说明。
-
-文档片段：
-${context}`,
+    system: ragSystemPrompt(context),
     user: question,
     schema: ragAnswerSchema,
+    promptVersion: RAG_PROMPT_VERSION,
   });
 
   return { answer: answer.answer, sources: chunks.map((c) => c.source) };
