@@ -34,3 +34,57 @@ export function ragSystemPrompt(context: string): string {
 文档片段：
 ${context}`;
 }
+
+export const JUDGE_PROMPT_VERSION = "v1";
+
+/**
+ * 答案侧评审（LLM-as-judge）。**只在 `scripts/eval-answer.ts` 里用，不在线上链路里。**
+ *
+ * 两条判据的分工：faithfulness 管「有没有编」，relevance 管「有没有答到点上」。
+ * 刻意不让评委用自己的领域知识去核对事实对错 —— 那是正确性，不是忠实性；
+ * 两者混在一个分数里，指标就失去指向性，看不出该改检索还是改 prompt。
+ *
+ * 片段不足时如实说明必须记高分：否则正确的拒答会被判成不忠实，进而逼着模型
+ * 「宁可编也要答」，与 ragSystemPrompt 的防幻觉约束直接冲突。
+ */
+export function judgeSystemPrompt(): string {
+  return `你是 RAG 问答系统的评审员。只根据下面给出的「文档片段」「用户问题」「系统回答」打分，不要用你自己的领域知识去判断回答对不对 —— 你评估的是回答有没有依据、有没有答到点上，不是它是否符合事实。
+
+faithfulness（1-5）：回答是否**只依据**文档片段。
+  5 = 每一处事实陈述都能在片段里找到原文依据
+  4 = 主体有依据，个别概括或措辞略有外推，不影响事实
+  3 = 主要结论有依据，但夹带了片段里没有的具体信息（数字、名称、因果）
+  2 = 部分结论在片段里找不到依据
+  1 = 基本来自片段之外，或与片段矛盾
+  若片段本身不足以回答，而回答如实说明了这一点，faithfulness 记 5。
+
+relevance（1-5）：回答是否切题。
+  5 = 直接、完整地回答了问题
+  4 = 回答了，但冗长，或遗漏了次要部分
+  3 = 沾边，没有正面回答
+  2 = 大部分跑题
+  1 = 与问题无关
+  片段不足时如实说明「无法回答」，是在给定片段下对这个问题唯一正确的回应，记 5。
+
+reasoning 用一两句话说明这两分的依据，指出具体是哪一句有问题（若有）。`;
+}
+
+/** 评审的 user 侧。context 必须与生成时注入的上下文逐字一致（用 ragService 的 formatChunks 渲染）。 */
+export function judgeUserPrompt({
+  question,
+  answer,
+  context,
+}: {
+  question: string;
+  answer: string;
+  context: string;
+}): string {
+  return `【文档片段】
+${context}
+
+【用户问题】
+${question}
+
+【系统回答】
+${answer}`;
+}

@@ -22,7 +22,8 @@ export async function POST(req: Request) {
 
   try {
     const result = await askWithRag(question.trim());
-    return NextResponse.json(result);
+    // 只回 answer/sources：result.chunks 是内部评测要用的召回全文，不进 API 响应
+    return NextResponse.json({ answer: result.answer, sources: result.sources });
   } catch (e) {
     console.error("[rag/ask]", e);
     return NextResponse.json({ error: "AI 回答生成失败，请稍后重试" }, { status: 500 });

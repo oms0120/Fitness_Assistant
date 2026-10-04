@@ -47,3 +47,17 @@ export const ragAnswerSchema = z.object({
   answer: z.string(),
 });
 export type RagAnswerPayload = z.infer<typeof ragAnswerSchema>;
+
+/**
+ * 答案侧评测的评审返回体（LLM-as-judge）。**仅 `scripts/eval-answer.ts` 使用，不参与线上请求。**
+ *
+ * 只有 faithfulness / relevance 两项，判据见 prompts.ts 的 judgeSystemPrompt()。
+ * 注意：这里**没有**「与参考答案是否一致」这一项 —— 本 schema 测的是有没有编、
+ * 有没有答到点上，不等于正确率。正确性由检索召回指标 + 人工复核覆盖。
+ */
+export const answerJudgementSchema = z.object({
+  faithfulness: z.number().int().min(1).max(5),
+  relevance: z.number().int().min(1).max(5),
+  reasoning: z.string(),
+});
+export type AnswerJudgement = z.infer<typeof answerJudgementSchema>;
