@@ -3,11 +3,13 @@
 用法：
   .venv/Scripts/python eval/run_retrieval_eval.py
   .venv/Scripts/python eval/run_retrieval_eval.py --golden eval/golden.provisional.jsonl
-  .venv/Scripts/python eval/run_retrieval_eval.py --out /tmp/report.json
+  .venv/Scripts/python eval/run_retrieval_eval.py --compare          # dense vs hybrid 并排
+  .venv/Scripts/python eval/run_retrieval_eval.py --mode hybrid
 
-不调任何 LLM：只做本地 embedding + 点积，零成本、可反复跑、可进 CI。
+不调任何 LLM：只做本地 embedding + 点积 / BM25，零成本、可反复跑、可进 CI。
 检索直接调 server.search_chunks，与线上 /search 是同一份实现 —— 否则测的不是真实链路。
-报告默认写到仓库根的 eval-reports/<日期>-<prompt 版本>-retrieval.json，按 prompt 版本归档。
+报告默认写到仓库根的 eval-reports/<日期>-<prompt 版本>-<模式>-retrieval.json。
+**文件名带模式**：dense 和 hybrid 的数是两回事，共用文件名会静默覆盖。
 """
 import argparse
 import datetime
@@ -31,6 +33,7 @@ DEFAULT_GOLDEN = os.path.join(ROOT, "eval", "golden.jsonl")
 # 只报 k=1/3/5 看不出这个区别，而"召回还是排序"正是这份评测要回答的唯一问题。
 # 检索本身不受影响：embedding 是大头，多排序几十条是零头（见 latency_ms_median 的注释）。
 KS = (1, 3, 5, 10, 20, 50, 100)
+MODES = ("dense", "hybrid")
 
 PROMPTS_TS = os.path.join(REPO_ROOT, "src", "lib", "ai", "prompts.ts")
 RAG_VERSION_RE = re.compile(r'RAG_PROMPT_VERSION\s*=\s*"([^"]+)"')
@@ -52,10 +55,10 @@ def rag_prompt_version() -> str:
     return "unknown"
 
 
-def default_report_path(version: str) -> str:
-    """eval-reports/<日期>-<prompt 版本>-retrieval.json，与 TS 侧的 -answer.json 并列。"""
+def default_report_path(version: str, mode: str) -> str:
+    """eval-reports/<日期>-<prompt 版本>-<模式>-retrieval.json，与 TS 侧的 -answer.json 并列。"""
     day = datetime.date.today().isoformat()
-    return os.path.join(REPO_ROOT, "eval-reports", f"{day}-{version}-retrieval.json")
+    return os.path.join(REPO_ROOT, "eval-reports", f"{day}-{version}-{mode}-retrieval.json")
 
 
 def load_golden(path: str) -> list[dict]:
@@ -79,7 +82,7 @@ def load_chunk_sources() -> dict[int, str]:
     return dict(rows)
 
 
-def evaluate(records: list[dict]) -> tuple[list[dict], list[dict], list[float]]:
+def evaluate(records: list[dict], mode: str, candidates: int) -> tuple[list[dict], list[dict], list[float]]:
     """逐条检索并记录 gold 的排名。gold_chunk_ids 为空的条目不参与召回指标。"""
     answerable = [r for r in records if r.get("gold_chunk_ids")]
     rows, misses, latencies = [], [], []
@@ -87,7 +90,7 @@ def evaluate(records: list[dict]) -> tuple[list[dict], list[dict], list[float]]:
 
     for r in answerable:
         started = time.perf_counter()
-        res = search_chunks(r["question"], max(KS))
+        res = search_chunks(r["question"], max(KS), mode=mode, candidates=candidates)
         latencies.append((time.perf_counter() - started) * 1000)
 
         if res.get("error"):
@@ -160,72 +163,174 @@ def summarize(rows: list[dict], latencies: list[float], n_total: int, n_skipped:
     return {"metrics": metrics, "by_category": by_category}
 
 
+def report_lines(mode: str, report: dict, misses: list[dict]) -> list[str]:
+    """单个模式的结果块。返回行列表而不是直接 print，好让 --compare 能把两块攒着一起打。"""
+    m = report["metrics"]
+    lines = [
+        f"\n[eval] {mode}",
+        # 曲线打一行：形状（尾部是否还在爬）比单个数字重要，分 7 行反而看不出趋势
+        "  recall@k  " + "  ".join(f"k={k}:{m[f'recall@{k}']:.3f}" for k in KS),
+        "  hit@k     " + "  ".join(f"k={k}:{m[f'hit@{k}']:.3f}" for k in KS),
+        f"  MRR@5     {m['mrr@5']:.3f}",
+        f"  未进 top-{max(KS)}  {m['misses']} / {m['n_queries']}",
+        # 耗时按 max(KS) 量的：稠密侧开销几乎全在 embedding 那一次 HTTP 调用上，
+        # 点积+排序 1985 条是零点几毫秒。hybrid 多一次 BM25 打分，比 embedding 便宜得多。
+        f"  单次检索中位耗时 {m['latency_ms_median']:.0f} ms（k={max(KS)}，含 embedding）"
+        f"，top-1 相似度均值 {m['top1_score_mean']:.3f}",
+        "\n  按 category（recall@5）",
+    ]
+    for cat, entry in sorted(report["by_category"].items(), key=lambda kv: -kv[1]["n"]):
+        lines.append(f"    {cat:12s} n={entry['n']:3d}  recall@5 {entry['recall@5']:.3f}  hit@5 {entry['hit@5']:.3f}")
+    if misses:
+        lines.append(f"\n  未命中前 {min(10, len(misses))} 条")
+        for r in misses[:10]:
+            lines.append(f"    {r['id']} gold={r['gold_chunk_ids']}  {r['question']}")
+    return lines
+
+
+def run_mode(mode: str, records: list[dict], candidates: int) -> tuple[dict, list[dict]]:
+    rows, misses, latencies = evaluate(records, mode, candidates)
+    report = summarize(rows, latencies, len(records), len(records) - len(rows))
+    report["rows"] = rows
+    report["misses_detail"] = [
+        {"id": r["id"], "question": r["question"], "gold": r["gold_chunk_ids"]} for r in misses
+    ]
+    return report, misses
+
+
+def eval_at(records: list[dict], mode: str, top_k: int, candidates: int) -> dict:
+    """按**线上配置**量一次（top_k=5、候选池 50），不画曲线。
+
+    为什么要单独量：上面那条曲线是拿 top_k=max(KS) 跑的，而 `search_chunks` 里
+    `n = max(candidates, top_k)` —— top_k=100 时 candidates 被 max() 顶掉，形同虚设。
+    换句话说，曲线上那个 recall@5 是在 100 深的池子里取的 top-5，而线上是 50 深的池子。
+    RRF 的分数来自名次，池子深浅会改变融合结果，这两个数不一定相等 —— 拿池子 100 的
+    recall@5 当线上指标，就是在报一个线上拿不到的数。
+    """
+    answerable = [r for r in records if r.get("gold_chunk_ids")]
+    n = len(answerable)
+    hits = 0
+    mrr = 0.0
+    for r in answerable:
+        res = search_chunks(r["question"], top_k, mode=mode, candidates=candidates)
+        if res.get("error"):
+            sys.exit(f"[eval] 检索链路报错，评测中止：{res['error']}")
+        ranked = [hit["id"] for hit in res["results"]]
+        gold = set(r["gold_chunk_ids"])
+        ranks = [i + 1 for i, cid in enumerate(ranked) if cid in gold]
+        if ranks:
+            hits += 1
+            mrr += 1 / min(ranks)
+    return {
+        "top_k": top_k,
+        "candidates_per_route": candidates,
+        "n": n,
+        f"recall@{top_k}": hits / n if n else 0.0,
+        f"hit@{top_k}": hits / n if n else 0.0,
+        f"mrr@{top_k}": mrr / n if n else 0.0,
+    }
+
+
 def main():
     ap = argparse.ArgumentParser(description="RAG 检索侧评测（recall@k / hit@k / MRR）")
     ap.add_argument("--golden", default=DEFAULT_GOLDEN, help="golden set 路径")
-    ap.add_argument("--out", default=None, help="报告输出路径（默认 eval-reports/<日期>-<prompt 版本>-retrieval.json）")
+    ap.add_argument("--mode", default="dense", choices=MODES, help="检索模式（默认 dense）")
+    ap.add_argument("--compare", action="store_true", help="dense 与 hybrid 都跑，并排比较")
+    ap.add_argument(
+        "--candidates",
+        type=int,
+        default=max(KS),
+        help=f"融合前每一路取多少条（默认 {max(KS)}，与最大的 k 对齐 —— 池子比 k 小的话，"
+        "recall@k 量的是池子而不是系统）",
+    )
+    ap.add_argument("--out", default=None, help="报告输出路径（默认 eval-reports/<日期>-<版本>-<模式>-retrieval.json）")
     ap.add_argument("--prompt-version", default=None, help="归档用版本号；默认从 src/lib/ai/prompts.ts 读")
     ap.add_argument("--show-misses", type=int, default=10, help="打印前 N 条未命中")
+    ap.add_argument("--prod-top-k", type=int, default=5, help="线上 top_k，用来单独量一组线上配置的数（0 跳过）")
+    ap.add_argument("--prod-candidates", type=int, default=50, help="线上候选池，同上")
     args = ap.parse_args()
 
+    if args.compare and args.out:
+        sys.exit("[eval] --compare 会写两份报告，不能和 --out 一起用")
+
     version = args.prompt_version or rag_prompt_version()
-    out = args.out or default_report_path(version)
+    modes = list(MODES) if args.compare else [args.mode]
 
     records = load_golden(args.golden)
     gold_sizes = {len(r.get("gold_chunk_ids", [])) for r in records if r.get("gold_chunk_ids")}
 
-    rows, misses, latencies = evaluate(records)
-    report = summarize(rows, latencies, len(records), len(records) - len(rows))
-    metrics = report["metrics"]
-
     print(f"[eval] golden: {args.golden}")
-    print(f"[eval] prompt 版本: rag {version}")
-    print(f"[eval] 记录 {metrics['n_records']} 条，参与召回 {metrics['n_queries']} 条"
-          f"（跳过 gold 为空的 {metrics['n_skipped_no_gold']} 条）")
+    print(f"[eval] prompt 版本: rag {version}  |  候选池 {args.candidates} / 路")
+    print(f"[eval] 记录 {len(records)} 条，参与召回 {sum(1 for r in records if r.get('gold_chunk_ids'))} 条")
     if gold_sizes == {1}:
         print("[eval] 每条 gold 均为 1 个片段 → 本集合上 recall@k 与 hit@k 恒等；"
               "多 gold 的 multi_hop 题才会分叉")
     else:
         print(f"[eval] 每条 gold 片段数分布: {sorted(gold_sizes)}")
 
-    print("\n[eval] 指标")
-    # 曲线打一行：形状（尾部是否还在爬）比单个数字重要，分 7 行反而看不出趋势
-    print("  recall@k  " + "  ".join(f"k={k}:{metrics[f'recall@{k}']:.3f}" for k in KS))
-    print("  hit@k     " + "  ".join(f"k={k}:{metrics[f'hit@{k}']:.3f}" for k in KS))
-    print(f"  MRR@5     {metrics['mrr@5']:.3f}")
-    print(f"  未进 top-{max(KS)}  {metrics['misses']} / {metrics['n_queries']}")
-    # 耗时按 max(KS) 量的：检索开销几乎全在 embedding 那一次 HTTP 调用上，
-    # 点积+排序 1985 条是零点几毫秒。所以这个数也代表线上 k=5 的耗时。
-    print(f"  单次检索中位耗时 {metrics['latency_ms_median']:.0f} ms（k={max(KS)}，含 embedding）"
-          f"，top-1 相似度均值 {metrics['top1_score_mean']:.3f}")
+    all_metrics = {}
+    all_production = {}
+    for mode in modes:
+        report, misses = run_mode(mode, records, args.candidates)
+        all_metrics[mode] = report["metrics"]
 
-    print("\n[eval] 按 category（recall@5）")
-    for cat, entry in sorted(report["by_category"].items(), key=lambda kv: -kv[1]["n"]):
-        print(f"  {cat:12s} n={entry['n']:3d}  recall@5 {entry['recall@5']:.3f}  hit@5 {entry['hit@5']:.3f}")
+        for line in report_lines(mode, report, misses if args.show_misses else []):
+            print(line)
 
-    if misses and args.show_misses:
-        print(f"\n[eval] 未命中前 {min(args.show_misses, len(misses))} 条")
-        for r in misses[: args.show_misses]:
-            print(f"  {r['id']} gold={r['gold_chunk_ids']}  {r['question']}")
+        production = None
+        if args.prod_top_k > 0:
+            production = eval_at(records, mode, args.prod_top_k, args.prod_candidates)
+            all_production[mode] = production
+            k = production["top_k"]
+            print(
+                f"\n  线上配置（top_k={k}，候选池 {production['candidates_per_route']}/路）"
+                f"  recall@{k} {production[f'recall@{k}']:.3f}"
+                f"  MRR@{k} {production[f'mrr@{k}']:.3f}"
+            )
 
-    os.makedirs(os.path.dirname(out) or ".", exist_ok=True)
-    payload = {
-        "generated_at": datetime.datetime.now().isoformat(timespec="seconds"),
-        "golden": os.path.relpath(args.golden, REPO_ROOT),
-        # 与 scripts/eval-answer.ts 的报告同名字段，方便两份报告并排比较
-        "prompt_versions": {"rag": version},
-        # 未命中 = 未进 top-max(KS)，即正确片段压根没被检索出来
-        "misses_within_top": max(KS),
-        **report,
-        "misses": [
-            {"id": r["id"], "question": r["question"], "gold": r["gold_chunk_ids"]}
-            for r in misses
-        ],
-        "rows": rows,
-    }
-    with open(out, "w", encoding="utf-8") as f:
-        json.dump(payload, f, ensure_ascii=False, indent=2)
-    print(f"\n[eval] 报告已写入 {os.path.relpath(out, REPO_ROOT)}")
+        out = args.out or default_report_path(version, mode)
+        os.makedirs(os.path.dirname(out) or ".", exist_ok=True)
+        payload = {
+            "generated_at": datetime.datetime.now().isoformat(timespec="seconds"),
+            "golden": os.path.relpath(args.golden, REPO_ROOT),
+            # 与 scripts/eval-answer.ts 的报告同名字段，方便两份报告并排比较
+            "prompt_versions": {"rag": version},
+            "retrieval_mode": mode,
+            "candidates_per_route": args.candidates,
+            # 未命中 = 未进 top-max(KS)，即正确片段压根没被检索出来
+            "misses_within_top": max(KS),
+            "metrics": report["metrics"],
+            "production_config": production,
+            "by_category": report["by_category"],
+            "misses": report["misses_detail"],
+            "rows": report["rows"],
+        }
+        with open(out, "w", encoding="utf-8") as f:
+            json.dump(payload, f, ensure_ascii=False, indent=2)
+        print(f"[eval] 报告已写入 {os.path.relpath(out, REPO_ROOT)}")
+
+    if len(all_metrics) > 1:
+        print("\n[eval] 并排比较（同一条 golden、同一个候选池；差值 = 后者 − 前者）")
+        print("  " + "指标".ljust(14) + "".join(m.rjust(10) for m in modes) + "       差值")
+        # 每个指标一套格式："misses" 是条数，"latency_ms_median" 是毫秒，其余是比率。
+        # 差值要独立一套带正号的格式 —— 不能拿比率格式的结果再套 `>+11`，
+        # 那是对字符串用数字的对齐说明符，会抛 "Sign not allowed in string format specifier"。
+        for key in [f"recall@{k}" for k in KS] + ["mrr@5", "misses", "latency_ms_median"]:
+            unit = " ms" if key == "latency_ms_median" else ""
+            count = key in ("misses", "latency_ms_median")
+            fmt = "{:.0f}" if count else "{:.3f}"
+            delta_fmt = "{:+.0f}" if count else "{:+.3f}"
+            vals = [all_metrics[m][key] for m in modes]
+            body = "".join(f"{fmt.format(v):>10}" for v in vals)
+            print(f"  {key.ljust(14)}{body}{delta_fmt.format(vals[-1] - vals[0]):>11}{unit}")
+
+        if len(all_production) > 1:
+            k = next(iter(all_production.values()))["top_k"]
+            print(f"\n  线上配置（top_k={k}，候选池 {args.prod_candidates}/路）")
+            for key in [f"recall@{k}", f"mrr@{k}"]:
+                vals = [all_production[m][key] for m in modes]
+                body = "".join(f"{v:>10.3f}" for v in vals)
+                print(f"  {key.ljust(14)}{body}{vals[-1] - vals[0]:>+11.3f}")
 
 
 if __name__ == "__main__":
