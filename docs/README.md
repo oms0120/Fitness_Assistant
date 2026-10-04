@@ -134,11 +134,11 @@ rag-service/                         # Python RAG 服务（独立进程）
 ## RAG 检索服务（`rag-service/`，独立 Python 进程）
 
 - **`ocr.py`**：RapidOCR（ONNX Runtime）从扫描版 PDF 提取语料
-- **`ingest.py`**：清洗 → 切块（段落边界优先，超长段落 400 字滑窗 + 50 字重叠）→ 批量调 Ollama bge-m3 生成 1024 维向量 → 存 SQLite `vectors.db`
+- **`ingest.py`**：清洗 → 切块（段落优先）→ 批量调 Ollama bge-m3 生成 1024 维向量 → 存 SQLite `vectors.db`。切块三条规则：整段保留；短于 120 字的段落（目录行、小标题、表格残行）先与相邻段落合并，避免各自成为无信息片段；超长段落在段内按 400 字滑窗 + 50 字重叠，尾窗剩余不足两个重叠长度时并入当前窗口，不切出碎片
 - **`server.py`**：FastAPI 暴露 `/embed` 与 `/search`；检索做 L2 归一化后以点积等价余弦相似度做 Top-K，并对向量库维度做校验（换模型后旧索引报错而非静默出错）
 - **`embedding.py`**：Ollama `/api/embed` 客户端，`server.py` 与 `ingest.py` 共用
 
-语料：`data/力量训练基础.txt` + `data/dietary_guide.txt`（约 1.6MB），共 1739 个片段。
+语料：`data/力量训练基础.txt` + `data/dietary_guide.txt`（约 1.6MB），共 1985 个片段（`dietary_guide` 932 / `力量训练基础` 1053，无短于 120 字的片段）。
 
 前端侧 `src/lib/rag/`：`ragClient.ts` 调 `/search`（服务不可用返回空数组），`ragService.ts` 的 `askWithRag` 完成「检索 → 注入 prompt → 生成 → 返回出处」，prompt 限定模型仅依据召回片段作答、语料未覆盖时如实说明（防幻觉）。
 

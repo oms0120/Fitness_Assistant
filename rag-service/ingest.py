@@ -20,29 +20,76 @@ DB_PATH = os.path.join(DATA_DIR, "vectors.db")
 CHUNK_SIZE = 400
 OVERLAP = 50
 BATCH_SIZE = 32
+MIN_CHUNK = 120  # 段落短于此值先与相邻段落合并，避免目录行/标题各成一个无信息片段
 
 
 def clean(text: str) -> str:
-    """清洗：压缩连续空行、合并行内空白、去空行（OCR 噪声）。"""
+    """清洗：压缩连续空行、合并行内空白、去空行（OCR 噪声），但保留段落分隔。
+
+    结尾必须按段落重新拼接。早先的实现是 ``"\\n".join(所有非空行)``，
+    会把上一行刚压出来的 ``\\n\\n`` 又抹成单换行，于是 chunk_text 里的
+    ``text.split("\\n\\n")`` 每份语料只切出 1 个段落，按段落切块彻底失效，
+    全文退化成 400/50 滑窗（1739 个片段里只有 3 个短于 400 字符）。
+    """
     text = re.sub(r"\n{3,}", "\n\n", text)
     text = re.sub(r"[ \t]+", " ", text)
-    lines = [l.strip() for l in text.split("\n")]
-    lines = [l for l in lines if l]
-    return "\n".join(lines)
+    paragraphs = []
+    for para in text.split("\n\n"):
+        lines = [l.strip() for l in para.split("\n")]
+        lines = [l for l in lines if l]
+        if lines:
+            paragraphs.append("\n".join(lines))
+    return "\n\n".join(paragraphs)
 
 
-def chunk_text(text: str, size: int = CHUNK_SIZE, overlap: int = OVERLAP) -> list[str]:
-    """按段落切块，长段落按长度滑窗。"""
+def merge_short_paragraphs(paragraphs: list[str], min_size: int) -> list[str]:
+    """把过短的段落（目录行、小标题、表格残行）粘到相邻段落上。
+
+    切分修好之后这类段落会各自成为一个片段，而它们的向量几乎不携带语义信息，
+    却可能挤进 top-k 把真正有内容的片段挤出去。粘合后内容不丢，只是不再单独成段。
+    单独一个文件全是短行时（整篇目录），至少留 min_size//5 以免全被丢掉。
+    """
+    merged: list[str] = []
+    buf = ""
+    for para in paragraphs:
+        buf = f"{buf}\n{para}" if buf else para
+        if len(buf) >= min_size:
+            merged.append(buf)
+            buf = ""
+    if buf:
+        if merged:
+            merged[-1] = f"{merged[-1]}\n{buf}"  # 尾部残段并入上一条，不单列
+        elif len(buf) >= min_size // 5:
+            merged.append(buf)
+    return merged
+
+
+def chunk_text(
+    text: str,
+    size: int = CHUNK_SIZE,
+    overlap: int = OVERLAP,
+    min_size: int = MIN_CHUNK,
+) -> list[str]:
+    """按段落切块：整段保留；超长段落在段内滑窗。
+
+    尾窗剩余不足两个 overlap 时直接并入当前窗口——早先的写法按固定步长推进，
+    L=760 的段落会切出 ``[700:760]`` 这种 60 字的尾巴，既没有语义又占一个向量位。
+    """
     paragraphs = [p.strip() for p in text.split("\n\n") if p.strip()]
     chunks = []
-    for para in paragraphs:
+    for para in merge_short_paragraphs(paragraphs, min_size):
         if len(para) <= size:
             chunks.append(para)
-        else:
-            start = 0
-            while start < len(para):
-                chunks.append(para[start : start + size])
-                start += size - overlap
+            continue
+        start = 0
+        while start < len(para):
+            end = start + size
+            if len(para) - end < overlap * 2:
+                end = len(para)
+            chunks.append(para[start:end])
+            if end >= len(para):
+                break
+            start += size - overlap
     return chunks
 
 
