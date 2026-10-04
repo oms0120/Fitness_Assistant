@@ -51,13 +51,18 @@ export type RagAnswerPayload = z.infer<typeof ragAnswerSchema>;
 /**
  * 答案侧评测的评审返回体（LLM-as-judge）。**仅 `scripts/eval-answer.ts` 使用，不参与线上请求。**
  *
- * 只有 faithfulness / relevance 两项，判据见 prompts.ts 的 judgeSystemPrompt()。
+ * 三个轴各管一件事，判据见 prompts.ts 的 judgeSystemPrompt()：
+ *   faithfulness 有没有编 / relevance 有没有跑题 / sufficiency 有没有真的回答。
  * 注意：这里**没有**「与参考答案是否一致」这一项 —— 本 schema 测的是有没有编、
- * 有没有答到点上，不等于正确率。正确性由检索召回指标 + 人工复核覆盖。
+ * 有没有跑题、有没有回答，不等于正确率。正确性由检索召回指标 + 人工复核覆盖。
+ *
+ * sufficiency 是 v2 加的。加之前只有前两项，而「片段不足 → 如实说无法回答」
+ * 在前两项上都是满分，导致检索失败（弃答）在答案侧指标里完全不可见。
  */
 export const answerJudgementSchema = z.object({
   faithfulness: z.number().int().min(1).max(5),
   relevance: z.number().int().min(1).max(5),
+  sufficiency: z.number().int().min(1).max(5),
   reasoning: z.string(),
 });
 export type AnswerJudgement = z.infer<typeof answerJudgementSchema>;
