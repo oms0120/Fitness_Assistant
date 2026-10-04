@@ -53,3 +53,8 @@ rag-service/.venv/
 rag-service/data/
 # 任意深度：eval/ 下的脚本同样会生成 __pycache__
 __pycache__/
+
+# eval 报告（本地生成，用于同一台机器上跨版本对比）
+# 需要长期留存、要给人看的结论写进 eval/baseline-report.md 这类 markdown，那些是提交的；
+# 这里的 <日期>-<prompt 版本>-*.json 是逐条的原始数据，量大且可重跑，不进仓库
+/eval-reports/

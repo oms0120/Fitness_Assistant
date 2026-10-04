@@ -7,7 +7,10 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "test": "vitest run"
+    "test": "vitest run",
+    "eval:retrieval": "node scripts/py.mjs rag-service/eval/run_retrieval_eval.py",
+    "eval:answer": "tsx scripts/eval-answer.ts",
+    "eval": "npm run eval:retrieval && npm run eval:answer"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.117.1",
@@ -35,6 +38,7 @@
     "eslint-config-next": "16.3.1",
     "prisma": "^6.19.3",
     "tailwindcss": "^4",
+    "tsx": "^4.23.15",
     "typescript": "^5",
     "vitest": "^4.1.10"
   }
