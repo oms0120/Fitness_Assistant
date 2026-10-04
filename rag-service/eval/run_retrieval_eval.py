@@ -26,7 +26,11 @@ from server import DB_PATH, search_chunks  # noqa: E402
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))  # rag-service/
 REPO_ROOT = os.path.dirname(ROOT)
 DEFAULT_GOLDEN = os.path.join(ROOT, "eval", "golden.jsonl")
-KS = (1, 3, 5)
+# k 一路取到 100：**曲线形状**才决定瓶颈在召回还是排序 ——
+# 尾部还在爬 = 正确片段压根没进候选池（改召回）；很快到 1.000 = 只是前几位排错了（改 rerank）。
+# 只报 k=1/3/5 看不出这个区别，而"召回还是排序"正是这份评测要回答的唯一问题。
+# 检索本身不受影响：embedding 是大头，多排序几十条是零头（见 latency_ms_median 的注释）。
+KS = (1, 3, 5, 10, 20, 50, 100)
 
 PROMPTS_TS = os.path.join(REPO_ROOT, "src", "lib", "ai", "prompts.ts")
 RAG_VERSION_RE = re.compile(r'RAG_PROMPT_VERSION\s*=\s*"([^"]+)"')
@@ -125,8 +129,13 @@ def summarize(rows: list[dict], latencies: list[float], n_total: int, n_skipped:
             1 for row in rows if row["first_rank"] and row["first_rank"] <= k
         ) / n
 
-    # MRR@5：首个命中排名的倒数均值，未命中记 0
-    metrics["mrr@5"] = sum(1 / row["first_rank"] for row in rows if row["first_rank"]) / n
+    # MRR@5：首个命中排名的倒数均值，未命中记 0。
+    # 必须显式卡 <=5：KS 里现在有 k=100，first_rank 能取到 100，
+    # 不卡的话这个数会静默变成 MRR@100（0.687 → 0.702），而名字还写着 @5。
+    metrics["mrr@5"] = sum(
+        1 / row["first_rank"] for row in rows if row["first_rank"] and row["first_rank"] <= 5
+    ) / n
+    # 未进 top-max(KS)：正确片段根本没被检索出来的条数。这个数接近 0 就说明瓶颈不在召回。
     metrics["misses"] = sum(1 for row in rows if row["first_rank"] is None)
     metrics["n_queries"] = n
     metrics["n_records"] = n_total
@@ -180,13 +189,14 @@ def main():
         print(f"[eval] 每条 gold 片段数分布: {sorted(gold_sizes)}")
 
     print("\n[eval] 指标")
-    for k in KS:
-        print(f"  recall@{k}  {metrics[f'recall@{k}']:.3f}")
-    for k in KS:
-        print(f"  hit@{k}     {metrics[f'hit@{k}']:.3f}")
+    # 曲线打一行：形状（尾部是否还在爬）比单个数字重要，分 7 行反而看不出趋势
+    print("  recall@k  " + "  ".join(f"k={k}:{metrics[f'recall@{k}']:.3f}" for k in KS))
+    print("  hit@k     " + "  ".join(f"k={k}:{metrics[f'hit@{k}']:.3f}" for k in KS))
     print(f"  MRR@5     {metrics['mrr@5']:.3f}")
-    print(f"  完全未命中 {metrics['misses']} / {metrics['n_queries']}")
-    print(f"  单次检索中位耗时 {metrics['latency_ms_median']:.0f} ms"
+    print(f"  未进 top-{max(KS)}  {metrics['misses']} / {metrics['n_queries']}")
+    # 耗时按 max(KS) 量的：检索开销几乎全在 embedding 那一次 HTTP 调用上，
+    # 点积+排序 1985 条是零点几毫秒。所以这个数也代表线上 k=5 的耗时。
+    print(f"  单次检索中位耗时 {metrics['latency_ms_median']:.0f} ms（k={max(KS)}，含 embedding）"
           f"，top-1 相似度均值 {metrics['top1_score_mean']:.3f}")
 
     print("\n[eval] 按 category（recall@5）")
@@ -204,6 +214,8 @@ def main():
         "golden": os.path.relpath(args.golden, REPO_ROOT),
         # 与 scripts/eval-answer.ts 的报告同名字段，方便两份报告并排比较
         "prompt_versions": {"rag": version},
+        # 未命中 = 未进 top-max(KS)，即正确片段压根没被检索出来
+        "misses_within_top": max(KS),
         **report,
         "misses": [
             {"id": r["id"], "question": r["question"], "gold": r["gold_chunk_ids"]}
