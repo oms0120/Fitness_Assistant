@@ -94,3 +94,6 @@ for line in open('golden.jsonl', encoding='utf-8'):
 
 - 生成脚本：`build_golden.py` → 产出 `golden.candidates.jsonl`（候选，未校验）
 - 本文件对应的是**人工校验后**的最终集，候选不得直接当 golden 用
+- 评测脚本：`run_retrieval_eval.py`（只测检索，零 LLM 调用）
+- 已跑的报告：[`baseline-report.md`](./baseline-report.md) —— 110 条候选集上的检索 baseline 与瓶颈判读
+- **多 gold 标注**：baseline 显示语料高度冗余（同一句指导语在总表页与正文页各出现一次），单 gold 会把"召回了同样能答的另一片段"记成 miss。人工校对时请顺手确认还有哪些片段能支撑该答案，一并填进 `gold_chunk_ids`

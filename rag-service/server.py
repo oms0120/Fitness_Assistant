@@ -34,13 +34,19 @@ def do_embed(req: EmbedRequest):
     return {"embedding": vec.tolist(), "dim": int(len(vec)), "model": EMBED_MODEL}
 
 
-@app.post("/search")
-def search(req: SearchRequest):
+def search_chunks(query: str, top_k: int = 5) -> dict:
+    """向量化查询 → 与库中全部向量点积 → 排序取 top-k。
+
+    抽成独立函数是为了让 /search 端点与 eval 脚本共用同一份实现；
+    否则 eval 测的是另一套逻辑，跟线上链路不是一回事。
+
+    返回 {"results": [...], "error": str | None}，error 非空表示没检索到。
+    """
     if not os.path.exists(DB_PATH):
         return {"results": [], "error": "vectors.db 不存在，请先运行 ingest.py"}
 
     try:
-        qvec = embed(req.query)
+        qvec = embed(query)
     except EmbeddingError as exc:
         # 返回 200 + error，让前端按"检索不到"降级而不是整个请求失败
         return {"results": [], "error": str(exc)}
@@ -67,7 +73,12 @@ def search(req: SearchRequest):
         sim = float(np.dot(qvec, emb))
         results.append({"id": id_, "text": text, "source": source, "meta": meta, "score": sim})
     results.sort(key=lambda x: -x["score"])
-    return {"results": results[: req.top_k]}
+    return {"results": results[:top_k]}
+
+
+@app.post("/search")
+def search(req: SearchRequest):
+    return search_chunks(req.query, req.top_k)
 
 
 if __name__ == "__main__":
