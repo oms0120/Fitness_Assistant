@@ -51,6 +51,9 @@ prisma/*.db-journal
 # rag service (venv + 语料/向量库本地生成，不提交)
 rag-service/.venv/
 rag-service/data/
+# cross-encoder 权重（bge-reranker-base，279MB 的量化 ONNX）。
+# 与 data/ 同理：本地按需下载，不进仓库。缺了不影响服务启动，只是 rerank 自动降级。
+rag-service/models/
 # 任意深度：eval/ 下的脚本同样会生成 __pycache__
 __pycache__/
 

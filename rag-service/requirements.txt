@@ -4,3 +4,14 @@ requests
 rapidocr_onnxruntime
 numpy
 pypdf
+
+# cross-encoder 重排（rerank.py）。两者原本是 rapidocr_onnxruntime 的传递依赖，
+# 现在是直接依赖 —— 显式列出，免得哪天 rapidocr 换了后端把 rerank 一起带走。
+# 只跑服务不需要 torch：模型是预导出的 ONNX，见 rerank.py 的模块注释。
+onnxruntime>=1.29
+tokenizers>=0.22
+
+# 只为一次性下载 rerank 模型（eval/ 里没有它参与的运行路径）。
+#   HF_ENDPOINT=https://hf-mirror.com .venv/Scripts/python -c "..."
+# huggingface.co 在本机直连超时，hf-mirror.com 通，所以国内环境走镜像。
+huggingface-hub>=0.30
