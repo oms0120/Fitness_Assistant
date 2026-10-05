@@ -8,13 +8,14 @@ datasource db {
 }
 
 model User {
-  id           String         @id @default(cuid())
-  email        String         @unique
-  passwordHash String
-  trainingPlan TrainingPlan?
-  profiles     Profile[]
-  logs         Log[]
-  createdAt    DateTime       @default(now())
+  id              String           @id @default(cuid())
+  email           String           @unique
+  passwordHash    String
+  trainingPlan    TrainingPlan?
+  profiles        Profile[]
+  logs            Log[]
+  llmUsageRecords LlmUsageRecord[]
+  createdAt       DateTime         @default(now())
 }
 
 model Profile {
@@ -48,4 +49,38 @@ model TrainingPlan {
   data      String
   updatedAt DateTime @updatedAt
   user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+/// 每次大模型调用的记账行，也是每日预算查询的唯一数据源。
+///
+/// 两种行混在同一张表里，用 `degraded` 区分：
+///   - `degraded = false`：一次真实调用，token/latency 来自 API 返回的 usage。
+///   - `degraded = true` ：**被预算拦下**，没有发生调用，token 全为 0。
+///     名字读起来像「模型调用降级/失败」，不是那个意思 —— 只表示"预算拦的"。
+///
+/// `@@unique([userId, dayKey])` 封的是拦截行的写入量：被拦的用户循环重试会每次
+/// 写一行，10 req/s 下就是每天 86 万行垃圾。SQLite 的唯一索引把 NULL 视为互不
+/// 相同，所以真实行（`dayKey = NULL`）完全不受约束，只有拦截行按天 upsert。
+/// 顺带得到一个更有用的指标：这个用户一天撞了几次墙（`blockedCount`）。
+model LlmUsageRecord {
+  id               String   @id @default(cuid())
+  userId           String
+  provider         String
+  /// 被拦的行在查预算时就写下了，那时还没解析出模型名，故可空。
+  model            String?
+  promptTokens     Int
+  completionTokens Int
+  latencyMs        Int
+  degraded         Boolean  @default(false)
+  blockedCount     Int      @default(1)
+  /// 仅 degraded 行填 "YYYY-MM-DD"（按 `AI_BUDGET_TZ_OFFSET_MIN` 定的日界）；真实行为 NULL。
+  dayKey           String?
+  createdAt        DateTime @default(now())
+  user             User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, dayKey])
+  /// 每用户当日次数：`userId + createdAt`
+  @@index([userId, createdAt])
+  /// 全局当日 token 和：只按时间过滤。这张表只增不减，少了这个索引每次调用前都要全表扫。
+  @@index([createdAt])
 }

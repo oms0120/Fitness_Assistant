@@ -1,5 +1,6 @@
 import { searchChunks, type RagChunk } from "./ragClient";
 import { chatJson, resolveMode } from "@/lib/ai/llm";
+import { enforceBudget, usageSink } from "@/lib/ai/usage";
 import { ragAnswerSchema } from "@/lib/ai/types";
 import { RAG_EMPTY_CONTEXT, RAG_PROMPT_VERSION, ragSystemPrompt } from "@/lib/ai/prompts";
 
@@ -26,12 +27,21 @@ export function formatChunks(chunks: RagChunk[]): string {
     : RAG_EMPTY_CONTEXT;
 }
 
-/** 检索文档片段 → 注入 prompt → 生成带出处的回答。走 llm.ts 选定的后端。 */
-export async function askWithRag(question: string): Promise<RagAnswer> {
+/**
+ * 检索文档片段 → 注入 prompt → 生成带出处的回答。走 llm.ts 选定的后端。
+ *
+ * `userId` 传了才查预算、才记账。**评测脚本没有用户**（`scripts/eval-answer.ts`
+ * 与 `smoke.e2e.test.ts`），不传时行为与改造前完全一致。
+ */
+export async function askWithRag(question: string, userId?: string): Promise<RagAnswer> {
   // 问答没有规则库可降级，未配 key 时直接告诉用户
   if (resolveMode() === "rule") {
     throw new Error("未配置大模型 key（DEEPSEEK_API_KEY 或 ANTHROPIC_API_KEY），无法使用 AI 问答");
   }
+
+  // 预算检查放在检索**之前**：被拦下的请求不该先付一次 embedding + 检索的钱。
+  // 超限时这里抛 BudgetExceededError，由路由转成 429。
+  if (userId) await enforceBudget(userId);
 
   const chunks = await searchChunks(question, 5);
 
@@ -40,6 +50,7 @@ export async function askWithRag(question: string): Promise<RagAnswer> {
     user: question,
     schema: ragAnswerSchema,
     promptVersion: RAG_PROMPT_VERSION,
+    onUsage: userId ? usageSink(userId) : undefined,
   });
 
   return { answer: answer.answer, sources: chunks.map((c) => c.source), chunks };

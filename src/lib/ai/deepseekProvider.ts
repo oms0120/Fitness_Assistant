@@ -20,6 +20,23 @@ function timeoutMs(): number {
   return readInt(process.env.DEEPSEEK_TIMEOUT_MS, 60_000, 1);
 }
 
+/** OpenAI 兼容的 usage。整个 `usage` 在响应里可能缺失。 */
+export interface DeepSeekUsage {
+  prompt_tokens?: number;
+  completion_tokens?: number;
+}
+
+/** 导出是为了能脱离网络单测字段映射。 */
+export function deepseekUsageToLlmUsage(usage: DeepSeekUsage | undefined): {
+  promptTokens: number;
+  completionTokens: number;
+} {
+  return {
+    promptTokens: usage?.prompt_tokens ?? 0,
+    completionTokens: usage?.completion_tokens ?? 0,
+  };
+}
+
 /**
  * DeepSeek（OpenAI 兼容 /chat/completions）。
  *
@@ -32,13 +49,21 @@ function timeoutMs(): number {
 export const deepseekBackend: LlmBackend = {
   name: "deepseek",
 
-  async chatJson<T>({ system, user, schema, maxTokens }: ChatJsonOptions<T>): Promise<T> {
+  async chatJson<T>({
+    system,
+    user,
+    schema,
+    maxTokens,
+    onUsage,
+  }: ChatJsonOptions<T>): Promise<T> {
     const apiKey = process.env.DEEPSEEK_API_KEY;
     if (!apiKey) {
       throw new Error("未配置 DEEPSEEK_API_KEY");
     }
 
     const jsonSchema = JSON.stringify(z.toJSONSchema(schema));
+    // 延迟在 withRetry **外面**测：含重试的总墙钟时间才是用户感受到的那个。
+    const startedAt = Date.now();
     const res = await withRetry(
       () =>
         fetch(`${baseUrl()}/chat/completions`, {
@@ -79,7 +104,26 @@ export const deepseekBackend: LlmBackend = {
       },
     );
 
-    const content = (await res.json()).choices?.[0]?.message?.content;
+    const body = await res.json();
+
+    // 回调放在**任何校验之前**：下面三道校验（content 缺失 / JSON 解析失败 /
+    // schema 不匹配）抛出去的响应**照样已经计费**，晚一步就漏记最贵的那些调用。
+    //
+    // 外面那层 try 是第二道防线：onUsage 是调用方给的代码，而这里在 backend 的
+    // 错误边界之内 —— 它抛出去会被 chatJson 包装成 `[prompt ...]`，让一次记账
+    // 失败看起来像 prompt 回归，还发生在一个已经成功、已经计费的调用之后。
+    try {
+      onUsage?.({
+        provider: "deepseek",
+        model: body.model ?? model(),
+        ...deepseekUsageToLlmUsage(body.usage),
+        latencyMs: Date.now() - startedAt,
+      });
+    } catch (err) {
+      console.error("[deepseek] onUsage 回调失败", err);
+    }
+
+    const content = body.choices?.[0]?.message?.content;
     if (!content) {
       throw new Error("DeepSeek 返回为空");
     }
