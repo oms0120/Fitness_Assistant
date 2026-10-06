@@ -41,8 +41,15 @@ export interface LlmBackend {
 
 export type LlmMode = "rule" | "deepseek" | "claude";
 
-const hasDeepSeek = () => Boolean(process.env.DEEPSEEK_API_KEY);
-const hasClaude = () => Boolean(process.env.ANTHROPIC_API_KEY);
+/**
+ * 必须 `.trim()`：`Boolean("   ")` 是 true，所以一个只有空白的 key 会被当成配好了 ——
+ * `resolveMode` 报 claude/deepseek，然后拿这个空白 key 去请求、每次 401。
+ * 而本该发生的是**静默降级到规则库**（见下面的 resolveMode）。
+ * 空串本来就没事（`Boolean("")` 是 false），这个洞只在"有内容但没意义"时露出来 ——
+ * 容器编排里透传一个只含空格的变量就会踩到。
+ */
+const hasDeepSeek = () => Boolean(process.env.DEEPSEEK_API_KEY?.trim());
+const hasClaude = () => Boolean(process.env.ANTHROPIC_API_KEY?.trim());
 
 /**
  * 解析当前生效的模式。
