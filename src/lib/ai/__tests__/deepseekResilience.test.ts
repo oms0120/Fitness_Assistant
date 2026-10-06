@@ -17,6 +17,7 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } 
 import { z } from "zod";
 import { deepseekBackend, deepseekUsageToLlmUsage } from "@/lib/ai/deepseekProvider";
 import { claudeUsageToLlmUsage } from "@/lib/ai/claudeProvider";
+import { HttpError } from "@/lib/ai/resilience";
 import type { LlmUsage } from "@/lib/ai/llm";
 
 const opts = { system: "只输出 JSON", user: "ping", schema: z.object({ ok: z.boolean() }) };
@@ -262,5 +263,104 @@ describe("用量字段映射", () => {
         cache_read_input_tokens: null,
       }),
     ).toEqual({ promptTokens: 5, completionTokens: 6 });
+  });
+});
+
+/**
+ * 非 2xx 的路径。`fetch` 对 4xx/5xx **不抛异常**，所以 provider 里那句
+ * `if (!r.ok) throw new HttpError(...)` 是唯一的把关点 —— 少了它，一个 401 的
+ * 错误正文会被当成正常响应，继续往下走 JSON.parse + schema.parse。
+ *
+ * 这里特意**不用** `vi.stubGlobal("fetch")`：桩直接把 `HttpError` 抛出来，恰恰把
+ * 要验的那三行转换代码绕过去了，测试会变成自证。真起一个能设状态码的服务器才验得到。
+ */
+describe("DeepSeek 的 HTTP 错误", () => {
+  let errorApi: Server;
+  let errorApiUrl: string;
+  let status = 200;
+  let payload = "";
+  let requests = 0;
+
+  beforeAll(async () => {
+    errorApi = createServer((_req, res) => {
+      requests++;
+      res.writeHead(status, { "Content-Type": "application/json" });
+      res.end(payload);
+    });
+    await new Promise<void>((resolve) => errorApi.listen(0, "127.0.0.1", resolve));
+    errorApiUrl = `http://127.0.0.1:${(errorApi.address() as AddressInfo).port}`;
+  });
+
+  afterAll(async () => {
+    errorApi.closeAllConnections();
+    await new Promise<void>((resolve) => errorApi.close(() => resolve()));
+  });
+
+  beforeEach(() => {
+    status = 200;
+    payload = "";
+    requests = 0;
+    process.env.DEEPSEEK_BASE_URL = errorApiUrl;
+  });
+
+  it("401 → 抛 HttpError 且带状态码，一次都不重试", async () => {
+    status = 401;
+    payload = JSON.stringify({ error: { message: "Invalid API key" } });
+    process.env.DEEPSEEK_RETRIES = "3";
+
+    const err = await deepseekBackend.chatJson(opts).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(HttpError);
+    expect((err as HttpError).status).toBe(401);
+    // 参数错了重试多少次还是错，而每次都是真金白银（也是日预算在数的那些次）
+    expect(requests).toBe(1);
+  });
+
+  it("503 → 重试到耗尽，抛的是最后一个 HttpError", async () => {
+    status = 503;
+    payload = "{}";
+    process.env.DEEPSEEK_RETRIES = "2";
+
+    const err = await deepseekBackend.chatJson(opts).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(HttpError);
+    expect((err as HttpError).status).toBe(503);
+    expect(requests).toBe(3); // 首发 + 2 次重试
+  });
+
+  it("错误正文不是 JSON 时也抛得出 HttpError——上游 502 常常回 HTML", async () => {
+    // 转换那一步用的是 `r.text()` 而不是 `r.json()`：用 r.json() 的话，一个 HTML
+    // 的错误页会在这里再抛一个 SyntaxError，把真正的 502 盖掉。
+    status = 502;
+    payload = "<html><body>Bad Gateway</body></html>";
+    process.env.DEEPSEEK_RETRIES = "0";
+
+    const err = await deepseekBackend.chatJson(opts).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(HttpError);
+    expect((err as HttpError).status).toBe(502);
+    expect((err as Error).message).toContain("Bad Gateway");
+  });
+
+  it("非 2xx 不触发 onUsage——被拒的请求不计费", async () => {
+    status = 429;
+    payload = JSON.stringify({ error: { message: "rate limited" } });
+    process.env.DEEPSEEK_RETRIES = "0";
+    const seen: LlmUsage[] = [];
+
+    await expect(
+      deepseekBackend.chatJson({ ...opts, onUsage: (u) => seen.push(u) }),
+    ).rejects.toThrow();
+
+    // 反过来的错误更贵：把 429/500 也记成一次调用，账单会系统性虚高。
+    expect(seen).toHaveLength(0);
+  });
+
+  it("错误信息里带上游返回的片段，且截断在 200 字符", async () => {
+    status = 400;
+    payload = JSON.stringify({ error: { message: "x".repeat(500) } });
+    process.env.DEEPSEEK_RETRIES = "0";
+
+    const err = (await deepseekBackend.chatJson(opts).catch((e: unknown) => e)) as Error;
+    expect(err.message).toContain("DeepSeek API 错误 400");
+    // 整段塞进 message 会让日志和错误上报爆掉；前缀约 21 字符 + 200
+    expect(err.message.length).toBeLessThan(250);
   });
 });
