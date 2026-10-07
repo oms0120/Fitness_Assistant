@@ -18,6 +18,7 @@ import { z } from "zod";
 import { deepseekBackend, deepseekUsageToLlmUsage } from "@/lib/ai/deepseekProvider";
 import { claudeUsageToLlmUsage } from "@/lib/ai/claudeProvider";
 import { HttpError } from "@/lib/ai/resilience";
+import { logger } from "@/lib/logger";
 import type { LlmUsage } from "@/lib/ai/llm";
 
 const opts = { system: "只输出 JSON", user: "ping", schema: z.object({ ok: z.boolean() }) };
@@ -49,7 +50,7 @@ beforeEach(() => {
   }
   process.env.DEEPSEEK_API_KEY = "test-key";
   // 重试会被 onRetry 打出来，测试输出里不需要
-  vi.spyOn(console, "warn").mockImplementation(() => {});
+  vi.spyOn(logger, "warn").mockImplementation(() => {});
 });
 
 afterEach(() => {
@@ -206,7 +207,7 @@ describe("DeepSeek 的用量回调", () => {
   });
 
   it("回调自己抛异常也不影响调用结果——否则一次记账失败会被当成模型失败", async () => {
-    const spy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const spy = vi.spyOn(logger, "error").mockImplementation(() => {});
     payload = {
       choices: [{ message: { content: okContent } }],
       usage: { prompt_tokens: 1, completion_tokens: 1 },

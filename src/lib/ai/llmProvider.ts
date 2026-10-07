@@ -20,8 +20,15 @@ export class LlmProvider implements AiProvider {
    * 收**函数**而不是 `userId`：这样这个类完全不碰数据库，可以脱离 DB 单测。
    * 不传就是不记账 —— 评测脚本（`scripts/eval-answer.ts`）没有用户，不该吃额度，
    * 也不该往 usage 表里写行。
+   *
+   * `requestId` 只用来打日志（跟着 `ChatJsonOptions` 透传到后端）。单独一个参数而不是
+   * 塞进 `sink`：`sink` 是记账用的，日志关联跟记账是两件事，混在一起会让评测脚本
+   * 为了打日志被迫传一个空 sink。
    */
-  constructor(private readonly sink?: (u: LlmUsage) => void) {}
+  constructor(
+    private readonly sink?: (u: LlmUsage) => void,
+    private readonly requestId?: string,
+  ) {}
 
   async recommendRecipes(input: RecipeRequest): Promise<RecipeSuggestion[]> {
     const result = await chatJson({
@@ -29,6 +36,7 @@ export class LlmProvider implements AiProvider {
       user: JSON.stringify(input),
       schema: recipeSuggestionsSchema,
       promptVersion: RECIPE_PROMPT_VERSION,
+      requestId: this.requestId,
       onUsage: this.sink,
     });
     return result.suggestions;
@@ -40,6 +48,7 @@ export class LlmProvider implements AiProvider {
       user: JSON.stringify(input),
       schema: planSuggestionSchema,
       promptVersion: PLAN_PROMPT_VERSION,
+      requestId: this.requestId,
       onUsage: this.sink,
     });
   }

@@ -2,9 +2,16 @@ import { NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { getProvider } from "@/lib/ai/provider";
 import { RateLimitedError, enforceRateLimit, retryAfterSeconds } from "@/lib/ai/rateLimit";
+import { logger } from "@/lib/logger";
+import { withRequestId } from "@/lib/apiRoute";
 import type { PlanRequest } from "@/lib/ai/types";
 
+/** 取号、回显响应头、兜底都在 `withRequestId` 里，这里只管处理。 */
 export async function POST(req: Request) {
+  return withRequestId(req, "[ai/plan]", (requestId) => handle(req, requestId));
+}
+
+async function handle(req: Request, requestId: string): Promise<NextResponse> {
   const session = await auth();
   if (!session?.user?.id) {
     return NextResponse.json({ error: "未登录" }, { status: 401 });
@@ -32,13 +39,13 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "请求体无效" }, { status: 400 });
   }
 
-  const provider = getProvider(session.user.id);
+  const provider = getProvider(session.user.id, requestId);
   try {
     const plan = await provider.generatePlan(body as PlanRequest);
     // degraded 的含义见 recipes 路由的同名注释
     return NextResponse.json({ plan, degraded: provider.degraded ?? false });
   } catch (e) {
-    console.error("[ai/plan]", e);
+    logger.error({ err: e, requestId }, "[ai/plan] AI 生成失败");
     return NextResponse.json({ error: "AI 生成失败，请稍后重试" }, { status: 500 });
   }
 }

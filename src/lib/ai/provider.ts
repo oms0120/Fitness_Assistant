@@ -20,14 +20,17 @@ export interface AiProvider {
  *
  * `userId` 传了才接预算与记账。**评测脚本没有用户**（`scripts/eval-answer.ts`），
  * 不传时既不查预算也不记账 —— 跑 110 条不该吃掉额度，也不该往 usage 表里写行。
+ *
+ * `requestId` 只影响日志。传进来是为了让 `usageSink` 与 `canSpend` 里那几条
+ * 日志也挂上同一个号 —— 它俩是异步的，没有它就只能靠时间戳猜是哪次请求。
  */
-export function getProvider(userId?: string): AiProvider {
+export function getProvider(userId?: string, requestId?: string): AiProvider {
   if (resolveMode() === "rule") return new RuleProvider();
-  if (!userId) return new LlmProvider();
+  if (!userId) return new LlmProvider(undefined, requestId);
 
   return new BudgetGuardedProvider(
-    new LlmProvider(usageSink(userId)),
+    new LlmProvider(usageSink(userId, requestId), requestId),
     new RuleProvider(),
-    () => canSpend(userId),
+    () => canSpend(userId, requestId),
   );
 }

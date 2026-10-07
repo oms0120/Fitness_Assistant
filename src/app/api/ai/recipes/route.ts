@@ -2,9 +2,16 @@ import { NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { getProvider } from "@/lib/ai/provider";
 import { RateLimitedError, enforceRateLimit, retryAfterSeconds } from "@/lib/ai/rateLimit";
+import { logger } from "@/lib/logger";
+import { withRequestId } from "@/lib/apiRoute";
 import type { RecipeRequest } from "@/lib/ai/types";
 
+/** 见 ai/plan 路由对 `withRequestId` 的说明。 */
 export async function POST(req: Request) {
+  return withRequestId(req, "[ai/recipes]", (requestId) => handle(req, requestId));
+}
+
+async function handle(req: Request, requestId: string): Promise<NextResponse> {
   const session = await auth();
   if (!session?.user?.id) {
     return NextResponse.json({ error: "未登录" }, { status: 401 });
@@ -37,14 +44,14 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "请求体无效" }, { status: 400 });
   }
 
-  const provider = getProvider(session.user.id);
+  const provider = getProvider(session.user.id, requestId);
   try {
     const suggestions = await provider.recommendRecipes(body as RecipeRequest);
     // degraded：额度用尽时这里是规则库的结果。不带这个字段的话降级是静默的，
     // 用户会以为模型就这水平。前端暂未消费，先把契约立起来。
     return NextResponse.json({ suggestions, degraded: provider.degraded ?? false });
   } catch (e) {
-    console.error("[ai/recipes]", e);
+    logger.error({ err: e, requestId }, "[ai/recipes] AI 生成失败");
     return NextResponse.json({ error: "AI 生成失败，请稍后重试" }, { status: 500 });
   }
 }

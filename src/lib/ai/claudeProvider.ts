@@ -1,5 +1,6 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { zodOutputFormat } from "@anthropic-ai/sdk/helpers/zod";
+import { logger } from "@/lib/logger";
 import { readInt } from "./resilience";
 import type { ChatJsonOptions, LlmBackend } from "./llm";
 
@@ -65,6 +66,7 @@ export const claudeBackend: LlmBackend = {
     schema,
     maxTokens,
     onUsage,
+    requestId,
   }: ChatJsonOptions<T>): Promise<T> {
     // 这里不套 withRetry，所以这个墙钟就是这一次 SDK 调用的真实耗时。
     const startedAt = Date.now();
@@ -87,7 +89,7 @@ export const claudeBackend: LlmBackend = {
         latencyMs: Date.now() - startedAt,
       });
     } catch (err) {
-      console.error("[claude] onUsage 回调失败", err);
+      logger.error({ err, requestId }, "[claude] onUsage 回调失败");
     }
 
     if (!response.parsed_output) {

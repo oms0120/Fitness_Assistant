@@ -1,3 +1,4 @@
+import { logger } from "@/lib/logger";
 import type { RecipeRequest, PlanRequest, RecipeSuggestion, PlanSuggestion } from "./types";
 import type { AiProvider } from "./provider";
 
@@ -34,7 +35,7 @@ export class BudgetGuardedProvider implements AiProvider {
     try {
       allowed = await this.canSpend();
     } catch (err) {
-      console.error("[ai] 预算判定失败，本次走模型", err);
+      logger.error({ err }, "[ai] 预算判定失败，本次走模型");
       allowed = true;
     }
     this.usedFallback = !allowed;

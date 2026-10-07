@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import { logger } from "@/lib/logger";
 import { BudgetGuardedProvider } from "@/lib/ai/guardedProvider";
 import type { AiProvider } from "@/lib/ai/provider";
 import type {
@@ -71,7 +72,7 @@ describe("BudgetGuardedProvider", () => {
   });
 
   it("判定抛异常时当「能花钱」处理——预算库抖一下不该让全站降级到模板", async () => {
-    const spy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const spy = vi.spyOn(logger, "error").mockImplementation(() => {});
     const primary = fake("primary");
     const fallback = fake("fallback");
     const p = new BudgetGuardedProvider(primary.provider, fallback.provider, async () => {
@@ -81,6 +82,7 @@ describe("BudgetGuardedProvider", () => {
     expect((await p.generatePlan(PLAN_INPUT)).name).toBe("primary");
     expect(p.degraded).toBe(false);
     expect(spy).toHaveBeenCalled();
+    spy.mockRestore();
   });
 
   it("两个能力各自问一次判定", async () => {

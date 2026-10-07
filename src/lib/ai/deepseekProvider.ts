@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { logger } from "@/lib/logger";
 import { HttpError, readInt, withRetry } from "./resilience";
 import type { ChatJsonOptions, LlmBackend } from "./llm";
 
@@ -55,6 +56,7 @@ export const deepseekBackend: LlmBackend = {
     schema,
     maxTokens,
     onUsage,
+    requestId,
   }: ChatJsonOptions<T>): Promise<T> {
     const apiKey = process.env.DEEPSEEK_API_KEY;
     if (!apiKey) {
@@ -97,9 +99,9 @@ export const deepseekBackend: LlmBackend = {
       {
         retries: readInt(process.env.DEEPSEEK_RETRIES, 2),
         onRetry: ({ attempt, attempts, delayMs, error }) =>
-          console.warn(
-            `[deepseek] 第 ${attempt}/${attempts} 次尝试失败，${delayMs}ms 后重试：` +
-              `${error instanceof Error ? error.message : String(error)}`,
+          logger.warn(
+            { err: error, requestId, attempt, attempts, delayMs },
+            "[deepseek] 调用失败，退避后重试",
           ),
       },
     );
@@ -120,7 +122,7 @@ export const deepseekBackend: LlmBackend = {
         latencyMs: Date.now() - startedAt,
       });
     } catch (err) {
-      console.error("[deepseek] onUsage 回调失败", err);
+      logger.error({ err, requestId }, "[deepseek] onUsage 回调失败");
     }
 
     const content = body.choices?.[0]?.message?.content;

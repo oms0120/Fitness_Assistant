@@ -3,8 +3,15 @@ import { auth } from "@/auth";
 import { askWithRag } from "@/lib/rag/ragService";
 import { BudgetExceededError } from "@/lib/ai/usage";
 import { RateLimitedError, enforceRateLimit, retryAfterSeconds } from "@/lib/ai/rateLimit";
+import { logger } from "@/lib/logger";
+import { withRequestId } from "@/lib/apiRoute";
 
+/** 见 ai/plan 路由对 `withRequestId` 的说明。 */
 export async function POST(req: Request) {
+  return withRequestId(req, "[rag/ask]", (requestId) => handle(req, requestId));
+}
+
+async function handle(req: Request, requestId: string): Promise<NextResponse> {
   const session = await auth();
   if (!session?.user?.id) {
     return NextResponse.json({ error: "未登录" }, { status: 401 });
@@ -36,7 +43,7 @@ export async function POST(req: Request) {
   }
 
   try {
-    const result = await askWithRag(question.trim(), session.user.id);
+    const result = await askWithRag(question.trim(), session.user.id, requestId);
     // 只回 answer/sources：result.chunks 是内部评测要用的召回全文，不进 API 响应
     return NextResponse.json({ answer: result.answer, sources: result.sources });
   } catch (e) {
@@ -51,7 +58,7 @@ export async function POST(req: Request) {
         { status: 429 },
       );
     }
-    console.error("[rag/ask]", e);
+    logger.error({ err: e, requestId }, "[rag/ask] AI 回答生成失败");
     return NextResponse.json({ error: "AI 回答生成失败，请稍后重试" }, { status: 500 });
   }
 }

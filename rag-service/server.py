@@ -23,7 +23,7 @@ import time
 from collections import defaultdict
 
 import numpy as np
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from pydantic import BaseModel
 
 import bm25 as bm25_mod
@@ -253,9 +253,32 @@ def search_chunks(
     return out
 
 
+_REQUEST_ID_RE = re.compile(r"[^A-Za-z0-9_.:-]")
+
+
+def _request_id(request: Request) -> str:
+    """取 x-request-id 并白名单清洗。
+
+    这个头是**外部输入**（客户端或反代给的），不清洗就写进日志的话：换行能伪造出
+    一整条日志行、ANSI 转义能污染终端、超长串能把每行撑爆。
+
+    字符集与 64 上限**刻意与 Node 侧 `src/lib/requestId.ts` 保持一致** —— 两边规则
+    不一样的话，Node 认下的号到了这边会被改掉，跨服务就关联不上了。
+    （只共用**字符集**，不共用处置方式：Node 是"不合法就换一个新号"，因为号是它生成的；
+    这边是"洗掉非法字符"，因为号只能由调用方给，服务端自己编一个反而对不上。）
+    """
+    return _REQUEST_ID_RE.sub("", request.headers.get("x-request-id", ""))[:64]
+
+
 @app.post("/search")
-def search(req: SearchRequest):
-    return search_chunks(req.query, req.top_k, req.mode, req.candidates)
+def search(req: SearchRequest, request: Request):
+    out = search_chunks(req.query, req.top_k, req.mode, req.candidates)
+    # 只在**出错**时打一行：eval 脚本会拿 110 条 golden 反复打这个端点，
+    # 每请求一行会把评测输出淹掉。这里要的是"Node 侧答得差时，能在 Python 日志里
+    # 找到同一个号"，不是逐请求追踪。
+    if out.get("error"):
+        print(f"[search] request_id={_request_id(request) or '-'} error={out['error']}", flush=True)
+    return out
 
 
 if __name__ == "__main__":

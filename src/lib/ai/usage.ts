@@ -28,6 +28,7 @@
  * `decideBudget` 测过了就以为这层也被测过。
  */
 import { prisma } from "@/lib/db/prisma";
+import { logger } from "@/lib/logger";
 import { readInt } from "./resilience";
 import { resolveMode, type LlmUsage } from "./llm";
 
@@ -211,10 +212,15 @@ export async function recordUsage(userId: string, u: LlmUsage): Promise<void> {
  * 给 `ChatJsonOptions.onUsage` 用的 sink。**自己吞掉异常** —— 它跑在 provider
  * 内部，抛出去会被 `chatJson` 的 catch 包装成 `[prompt ...]` 错误，让一次 DB
  * 写入失败看起来像 prompt 回归，而且是发生在一次已经成功、已经计费的调用之后。
+ *
+ * `requestId` 只进日志。记账本身与它无关，但那句"记账失败"必须能归到某次请求上 ——
+ * 这正是引入 request ID 要解决的事。
  */
-export function usageSink(userId: string): (u: LlmUsage) => void {
+export function usageSink(userId: string, requestId?: string): (u: LlmUsage) => void {
   return (u) => {
-    void recordUsage(userId, u).catch((err) => console.error("[usage] 记账失败", err));
+    void recordUsage(userId, u).catch((err) =>
+      logger.error({ err, requestId }, "[usage] 记账失败"),
+    );
   };
 }
 
@@ -224,12 +230,12 @@ export function usageSink(userId: string): (u: LlmUsage) => void {
  * 名字用 enforce 而不是 assert：它**有副作用**（写 degraded 行），叫 assert
  * 会让人以为它只读，那样就很容易忘记记账。
  */
-export async function enforceBudget(userId: string): Promise<void> {
+export async function enforceBudget(userId: string, requestId?: string): Promise<void> {
   let check: BudgetCheck;
   try {
     check = await checkBudget(userId);
   } catch (err) {
-    console.error("[usage] 预算查询失败，本次放行", err);
+    logger.error({ err, requestId }, "[usage] 预算查询失败，本次放行");
     return;
   }
   if (check.decision.ok) return;
@@ -240,7 +246,7 @@ export async function enforceBudget(userId: string): Promise<void> {
 
   // 记不上也照样拦：已经查出来超了，记账是次要的。
   await recordBlocked(userId, resolveMode()).catch((err) =>
-    console.error("[usage] 写拦截记录失败", err),
+    logger.error({ err, requestId }, "[usage] 写拦截记录失败"),
   );
   throw new BudgetExceededError(reason, used, limit);
 }
@@ -249,16 +255,16 @@ export async function enforceBudget(userId: string): Promise<void> {
  * 给 `BudgetGuardedProvider` 用的判定：还能不能花钱。查询失败时**放行**（fail-open）。
  * 超限时同样记一行拦截。
  */
-export async function canSpend(userId: string): Promise<boolean> {
+export async function canSpend(userId: string, requestId?: string): Promise<boolean> {
   try {
     const { decision } = await checkBudget(userId);
     if (decision.ok) return true;
     await recordBlocked(userId, resolveMode()).catch((err) =>
-      console.error("[usage] 写拦截记录失败", err),
+      logger.error({ err, requestId }, "[usage] 写拦截记录失败"),
     );
     return false;
   } catch (err) {
-    console.error("[usage] 预算查询失败，本次放行", err);
+    logger.error({ err, requestId }, "[usage] 预算查询失败，本次放行");
     return true;
   }
 }

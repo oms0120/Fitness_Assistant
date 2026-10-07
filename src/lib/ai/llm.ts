@@ -23,6 +23,14 @@ export interface ChatJsonOptions<T> {
   /** prompts.ts 的版本常量。出错时带进错误信息，便于定位是哪版 prompt 的回归。 */
   promptVersion?: string;
   /**
+   * 本次请求的关联 ID，由路由入口生成。**透传给后端**（不像 `promptVersion` 那样
+   * 在 `chatJson` 里被脱掉），后端的重试 warn 与 onUsage 失败 error 都要带上它，
+   * 否则同一次请求散在各层的日志又只能靠时间戳猜。
+   *
+   * 不发给上游供应商：这里贯穿的是**我们自己的**日志。
+   */
+  requestId?: string;
+  /**
    * 拿到响应后回调用量。**必须在响应体解析之后、任何校验之前触发** ——
    * 被 `JSON.parse` 或 `schema.parse` 拒绝的响应照样计费，晚一步就会漏记
    * 最贵的那些调用（`scripts/eval-answer.ts` 甚至会在校验失败时重试两次）。

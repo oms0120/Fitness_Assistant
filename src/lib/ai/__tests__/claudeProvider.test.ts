@@ -19,6 +19,7 @@ import type { AddressInfo } from "node:net";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import { claudeBackend } from "@/lib/ai/claudeProvider";
+import { logger } from "@/lib/logger";
 import type { LlmUsage } from "@/lib/ai/llm";
 
 const opts = { system: "只输出 JSON", user: "ping", schema: z.object({ ok: z.boolean() }) };
@@ -117,7 +118,7 @@ describe("Claude 后端的结构化输出", () => {
   });
 
   it("回调自己抛异常也不影响调用结果——一次记账失败不该被当成模型失败", async () => {
-    const spy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const spy = vi.spyOn(logger, "error").mockImplementation(() => {});
     await expect(
       claudeBackend.chatJson({
         ...opts,
