@@ -1,17 +1,19 @@
-fastapi
-uvicorn
-requests
-rapidocr_onnxruntime
-numpy
-pypdf
+# 检索服务**运行时**真正 import 的包。容器镜像只装这些（见 Dockerfile）。
+#
+# 全部锁到本机 rag-service/.venv 里实际装的版本。原先要么是裸名、要么是 `>=`，
+# 构建结果会随上游发版漂移：今天能建的镜像，下周同一个 commit 可能就装出另一套
+# 依赖，而症状往往在运行时才露出来（onnxruntime 与 tokenizers 的 ABI 对不上）。
+# 改版本时请连着跑一次 rag-service/eval/run_retrieval_eval.py，别只看服务能不能起。
+#
+# 一次性脚本（ocr.py / ingest.py / 下载 rerank 模型）的依赖在
+# requirements-tools.txt，**故意不进镜像**。
+fastapi==0.141.1
+uvicorn==0.52.4
+requests==2.34.2
+numpy==2.5.2
 
 # cross-encoder 重排（rerank.py）。两者原本是 rapidocr_onnxruntime 的传递依赖，
 # 现在是直接依赖 —— 显式列出，免得哪天 rapidocr 换了后端把 rerank 一起带走。
 # 只跑服务不需要 torch：模型是预导出的 ONNX，见 rerank.py 的模块注释。
-onnxruntime>=1.29
-tokenizers>=0.22
-
-# 只为一次性下载 rerank 模型（eval/ 里没有它参与的运行路径）。
-#   HF_ENDPOINT=https://hf-mirror.com .venv/Scripts/python -c "..."
-# huggingface.co 在本机直连超时，hf-mirror.com 通，所以国内环境走镜像。
-huggingface-hub>=0.30
+onnxruntime==1.29.0
+tokenizers==0.22.2

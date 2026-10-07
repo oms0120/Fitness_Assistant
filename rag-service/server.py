@@ -99,7 +99,29 @@ def _bm25_index() -> bm25_mod.Bm25Index:
 
 
 def _load_rows() -> list[tuple]:
-    conn = sqlite3.connect(DB_PATH)
+    """读出全量片段。只读打开，与 `_bm25_index` 一致。
+
+    `mode=ro` 在这里是**声明意图**，不是修一个已知的 500。
+
+    曾经的理由是"旧写法（`sqlite3.connect(DB_PATH)`，即 O_RDWR|O_CREAT）在只读挂载上
+    会 EROFS，而这条路没有异常保护，于是 /search 500、被 Node 侧吞成没检索到"。
+    实测**证伪**了：SQLite 的 unix VFS 在 O_RDWR 撞上 EROFS 之后会**自己回退成只读
+    打开**，旧写法在 `:ro` 挂载上 SELECT 照常工作（写才会报 "attempt to write a
+    readonly database"）。同样地，"会在宿主机旁边生成 -journal / -wal"也不成立 ——
+    `journal_mode` 是 `delete`，纯 SELECT 不建日志文件。
+
+    留着它只有两条理由，都不紧急：
+
+    1. 把"只读"这个契约显式化。旧写法交出来的是一个 SQLite 私自降级过的读写连接，
+       进程自以为能写；哪天真需要日志恢复之类，会以很难懂的方式失败。
+    2. 与 `_bm25_index` 用同一种打开方式。同一个库、同一个进程，两处用不同的 open
+       标志属于埋雷。
+
+    它**不**解决更值得关注的那件事：`search_chunks` 里唯一的 try 只包了 `embed`，
+    数据库这一路（`_load_rows` / `_dense_scores` / `_bm25_index`）出错仍然会让
+    /search 返回 500，被 Node 侧吞成"没检索到"。要兜住得在 `search_chunks` 里加保护。
+    """
+    conn = sqlite3.connect(f"file:{DB_PATH}?mode=ro", uri=True)
     rows = conn.execute("SELECT id, text, source, meta, embedding FROM chunks").fetchall()
     conn.close()
     return rows

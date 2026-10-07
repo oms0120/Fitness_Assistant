@@ -1,0 +1,17 @@
+# 一次性脚本的依赖。**故意不进容器镜像**（见 Dockerfile）——
+# 服务器进程（server.py → bm25 / embedding / rerank）一行都不 import 它们，
+# 装进去只会让镜像大一倍（rapidocr 一家就拖进 opencv + shapely + pyclipper + pillow）。
+#
+# 装法：
+#   pip install -r requirements.txt -r requirements-tools.txt
+#
+# 注意向量库不能由 compose 那套产出：这会往 data/ 里写，而容器那边是 :ro 挂载，
+# 镜像里也没有这些包。ingest.py 和 ocr.py 一律在宿主机跑。
+
+pypdf==6.16.1                 # ocr.py：读 PDF
+rapidocr-onnxruntime==1.2.3   # ocr.py：逐页识别
+
+# 只为一次性下载 rerank 模型（eval/ 里没有它参与的运行路径）。
+#   HF_ENDPOINT=https://hf-mirror.com .venv/Scripts/python -c "..."
+# huggingface.co 在本机直连超时，hf-mirror.com 通，所以国内环境走镜像。
+huggingface-hub==0.36.2

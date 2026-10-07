@@ -1,0 +1,34 @@
+# Docker 构建上下文（根 context，给 Dockerfile 用）。
+# rag-service 有自己独立的 context 和 .dockerignore，见 rag-service/.dockerignore。
+
+# 敏感文件。**这是安全项，不是卫生项**：Next 的 writeStandaloneDirectory 会把
+# `.env` / `.env.production` 复制进 `.next/standalone`，于是 next build 一旦读到它，
+# AUTH_SECRET 和一个正在用的 DEEPSEEK_API_KEY 就被烤进镜像层。
+.env
+.env.*
+
+# 宿主机装的依赖，镜像里由 `npm ci` 重新装（且必须是 Linux 的 Prisma 引擎）
+node_modules
+
+# 构建产物，镜像里由 builder 阶段重新生成
+.next
+out
+build
+
+# 每次 tsc / 编辑器一动就重写，会把 builder 的 `COPY . .` 那层缓存全冲掉
+tsconfig.tsbuildinfo
+next-env.d.ts
+
+# 与构建无关
+docs
+eval-reports
+.claude
+.git
+.gitignore
+
+# 宿主机上的 SQLite 库。镜像里不落任何数据，运行期挂命名卷到 /data
+*.db
+*.db-journal
+
+# Python 侧整个排除：服务端构建一行都不需要它
+rag-service

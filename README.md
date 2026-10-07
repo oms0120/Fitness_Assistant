@@ -40,12 +40,39 @@ ollama serve                                    # 启动 Ollama（默认 127.0.0
 ollama pull bge-m3                              # 拉取 embedding 模型（约 1.2GB，仅首次）
 
 cd rag-service
-.venv/Scripts/python -m pip install -r requirements.txt
+# requirements.txt 是服务运行时依赖；requirements-tools.txt 是 ocr.py / ingest.py
+# 这些一次性脚本的依赖（OCR 那套比较大，服务进程不需要）
+.venv/Scripts/python -m pip install -r requirements.txt -r requirements-tools.txt
 .venv/Scripts/python ingest.py                  # 把 data/*.txt 切块入库到 data/vectors.db
 .venv/Scripts/python server.py                  # 检索服务监听 127.0.0.1:8000
 ```
 
 换 embedding 模型后必须重跑 `ingest.py` 重建索引，否则 `/search` 会返回维度不一致的提示。Ollama 或向量库不可用时，前端会降级为"未检索到相关文档片段"，不会报错中断。
+
+## Docker
+
+整条链路（Next + 检索服务）一条命令起，Ollama 仍跑在宿主机上。
+
+```bash
+docker compose up --build
+```
+
+打开 http://localhost:3000（空库，先注册一个账号）。
+
+| 服务 | 说明 |
+|---|---|
+| `migrate` | 一次性。对 `/data/dev.db` 跑 `prisma migrate deploy`，跑完即退 |
+| `app` | Next.js standalone，端口 3000 |
+| `rag` | FastAPI 检索服务，端口 8000 |
+
+**前置**：`rag-service/data/vectors.db` 必须先存在 —— 它在 `.gitignore` 里，由宿主机的 `ingest.py` 生成（见上）。没有的话检索会返回"vectors.db 不存在"，前端降级成无上下文答案：问答能通，但**不给出处**。
+
+两个卷策略不一样，是有意的：
+
+- `app` 的 SQLite 用**命名卷** `app-db`。SQLite 跑在 Windows→Linux 的绑定挂载层上，锁和 WAL 有已知的不稳定风险，命名卷绕开这一层。
+- `rag` 的 `data/` 用**绑定挂载 + 只读**。宿主是向量库的唯一事实来源，重新 `ingest.py` 之后容器立刻生效，不用重建镜像。
+
+改 Python 依赖后要 `docker compose up --build rag`。改前端代码后 `docker compose up --build app`。容器内跑的是构建产物，不是热重载。
 
 ## AI 接入
 
@@ -77,7 +104,9 @@ cd rag-service
 ## 测试
 
 ```bash
-npm test    # 运行 Vitest 单测（32 个用例）
+npm test    # 运行 Vitest 单测
 npm run lint
 npm run build
 ```
+
+`npm run build` 会额外产出 `.next/standalone`（`next.config.ts` 里的 `output: "standalone"`，给 Docker 用）。`npm run dev` / `npm start` 不受影响。

@@ -1,0 +1,9 @@
+.venv/
+__pycache__/
+models/
+data/
+eval/
+
+# 构建镜像一行都不需要，且 .venv 里是 Windows 的可执行文件
+*.db
+*.pyc

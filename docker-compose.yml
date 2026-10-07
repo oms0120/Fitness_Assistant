@@ -1,0 +1,94 @@
+# 本地一条命令起全套：docker compose up
+#
+#   migrate  一次性，建/迁移 /data/dev.db，跑完即退
+#   app      Next.js standalone（端口 3000）
+#   rag      FastAPI 检索服务（端口 8000）
+#
+# Ollama **不在**这里 —— 它跑在宿主机上（bge-m3 已 pull）。容器通过
+# host.docker.internal 找它，见 rag 服务的 OLLAMA_BASE_URL。
+#
+# 前置：rag-service/data/vectors.db 必须先存在（宿主机跑 ingest.py 生成，
+# 它在 .gitignore 里，不进仓库）。没有的话 /search 会返回
+# "vectors.db 不存在"，前端降级成"未检索到相关文档片段" —— 问答能通，但没有上下文。
+
+services:
+  migrate:
+    build:
+      context: .
+      # prisma CLI 是 devDependency，只有 builder 阶段装了它
+      target: builder
+    # 这行不能省。builder 继承的是 node:22-bookworm-slim 的 `CMD ["node"]`，
+    # 少了 command 就会跑一个裸 node：无 TTY → stdin 立刻 EOF → **退出码 0**。
+    # 于是 service_completed_successfully 满足、app 正常启动，但库是空的，
+    # 每个请求 500，而且日志里一个字都没有。
+    command: npx prisma migrate deploy
+    environment:
+      # 绝对路径，不依赖 schema 相对定位 —— file:./dev.db 会解析到镜像内部，
+      # 那是只读的代码层，重启即丢。
+      DATABASE_URL: file:/data/dev.db
+    volumes:
+      - app-db:/data
+    # 不要加 restart: —— 与 app 那边的 service_completed_successfully 组合
+    # 会被 compose 判为配置错误（既要求"跑完就停"又要"自动重启"，语义冲突）。
+    # 每次 `up` 都会重跑，migrate deploy 幂等，重复跑没有副作用。
+
+  app:
+    build:
+      context: .
+      target: runner
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    ports:
+      - "3000:3000"
+    environment:
+      # 必须在**运行时**给：Docker 创建容器时注入的 HOSTNAME（容器 ID/IP）会盖掉
+      # 镜像里的 ENV，而 server.js 读的就是 process.env.HOSTNAME，默认才是 0.0.0.0。
+      HOSTNAME: "0.0.0.0"
+      # 压掉 .env 里的 file:./dev.db —— environment 优先级高于 env_file
+      DATABASE_URL: file:/data/dev.db
+      # 不设的话容器里（NODE_ENV=production）trustHost 判定为 false，
+      # assertConfig 抛 UntrustedHost，所有 auth 请求 500。
+      # NEXTAUTH_URL 救不了：它只被读去算 basePath/secret，不参与这个判定。
+      AUTH_TRUST_HOST: "true"
+      # 必须有。Auth.js 的 createActionURL 在 AUTH_URL 缺席时回退到请求头里的 host，
+      # 而容器里那个 host 是上面 HOSTNAME=0.0.0.0 —— 于是登录成功后 302 到
+      # http://0.0.0.0:3000，而 session cookie 是 host-only 绑在 localhost 上的
+      # （Set-Cookie 里没有 Domain），浏览器跳到 0.0.0.0 就不带 cookie，
+      # 表现是"登录了但没登上"。给一个绝对地址把这一环钉死。
+      AUTH_URL: http://localhost:3000
+      RAG_SERVICE_URL: http://rag:8000
+    # .env 在 .gitignore 里，从没提交过 —— 干净 clone 下这里不能是硬失败，
+    # 所以用 required: false 的长写法。只指望它带 AUTH_SECRET / DEEPSEEK_API_KEY，
+    # 其余非敏感项都在上面 environment 里写死了。
+    env_file:
+      - path: .env
+        required: false
+    volumes:
+      - app-db:/data
+
+  rag:
+    build:
+      context: ./rag-service
+    ports:
+      - "8000:8000"
+    environment:
+      # 容器里的 127.0.0.1 是它自己，不是宿主机
+      OLLAMA_BASE_URL: http://host.docker.internal:11434
+      # 默认 hybrid（向量 + BM25 融合）。要开重排就改成 hybrid+rerank20，
+      # 前提是 rag-service/models/ 里有那 279MB 的 cross-encoder 权重。
+      RAG_RETRIEVAL_MODE: hybrid
+    # Docker Desktop（Win/Mac）自带这个别名；Linux 上要靠 host-gateway
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      # 绑定挂载而不是命名卷：vectors.db 由宿主机上的 ingest.py 产出，
+      # 宿主是唯一事实来源，重新 ingest 后容器立刻生效、不用重建镜像。
+      # 只读是安全的 —— server.py 两条读路径都只 SELECT（其中一条已改成 mode=ro）。
+      - ./rag-service/data:/app/data:ro
+      # 可选。空目录也无害：rerank.py 加载失败会抛 RerankError，
+      # 被 server.py 接住软降级回 base 模式，只在响应里带个 rerank_error 字段。
+      - ./rag-service/models:/app/models:ro
+
+volumes:
+  app-db:
