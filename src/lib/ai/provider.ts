@@ -4,6 +4,7 @@ import { LlmProvider } from "./llmProvider";
 import { BudgetGuardedProvider } from "./guardedProvider";
 import { resolveMode } from "./llm";
 import { canSpend, usageSink } from "./usage";
+import { logger } from "@/lib/logger";
 
 export interface AiProvider {
   recommendRecipes(input: RecipeRequest): Promise<RecipeSuggestion[]>;
@@ -25,12 +26,30 @@ export interface AiProvider {
  * 日志也挂上同一个号 —— 它俩是异步的，没有它就只能靠时间戳猜是哪次请求。
  */
 export function getProvider(userId?: string, requestId?: string): AiProvider {
-  if (resolveMode() === "rule") return new RuleProvider();
+  const mode = resolveMode();
+
+  // `resolveMode()` 的**静默**降级：`AI_PROVIDER` 明确指定了某一家，但对应的 key 没配
+  // （或只有空白，见 llm.ts 的 trim），于是落回规则库。用户以为在用模型、其实一直吃模板 ——
+  // 除了这行日志没有任何地方看得出来。认不出的取值（如 "gpt"）也走这里。
+  //
+  // 只在**降级**时打：「一个 key 都没配」是评测和 CI 的正常状态，不是故障，
+  // 那种情况也打日志只会把真正的降级淹掉。
+  //
+  // 判断写在这里而不是 `resolveMode()` 内部：那是个纯函数，每个请求会被调多次
+  // （`usage.ts` 的 `recordBlocked` 也调它），塞进去会重复打点，而且它拿不到 requestId。
+  // 这里是一次请求一次，粒度正好。
+  const requested = process.env.AI_PROVIDER;
+  if (requested && requested !== "rule" && mode === "rule") {
+    logger.warn({ requestId, requested }, "[ai] AI_PROVIDER 指定的后端无法生效，已降级到规则库");
+  }
+
+  if (mode === "rule") return new RuleProvider();
   if (!userId) return new LlmProvider(undefined, requestId);
 
   return new BudgetGuardedProvider(
     new LlmProvider(usageSink(userId, requestId), requestId),
     new RuleProvider(),
     () => canSpend(userId, requestId),
+    requestId,
   );
 }

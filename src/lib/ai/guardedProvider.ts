@@ -23,6 +23,8 @@ export class BudgetGuardedProvider implements AiProvider {
     private readonly primary: AiProvider,
     private readonly fallback: AiProvider,
     private readonly canSpend: () => Promise<boolean>,
+    /** 只进日志 —— 降级那条 warn 要靠它和同一次请求的其他日志串起来。 */
+    private readonly requestId?: string,
   ) {}
 
   /** 这次结果是不是降级来的。路由据此在响应里带 `degraded`。 */
@@ -35,10 +37,15 @@ export class BudgetGuardedProvider implements AiProvider {
     try {
       allowed = await this.canSpend();
     } catch (err) {
-      logger.error({ err }, "[ai] 预算判定失败，本次走模型");
+      logger.error({ err, requestId: this.requestId }, "[ai] 预算判定失败，本次走模型");
       allowed = true;
     }
     this.usedFallback = !allowed;
+    if (!allowed) {
+      // 预算降级此前**只**体现在响应体的 `degraded: true` 上，而那个字段到浏览器就没了：
+      // 日志里 grep 不到，用户报「AI 生成的东西像是模板」时没有第二处能确认。
+      logger.warn({ requestId: this.requestId }, "[ai] 预算不足，本次降级到规则库");
+    }
     return allowed ? this.primary : this.fallback;
   }
 

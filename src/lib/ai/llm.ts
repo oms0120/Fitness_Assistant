@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { logger } from "@/lib/logger";
 
 /**
  * 一次大模型调用的用量，由各 provider 从 API 响应里解析出来后回调出去。
@@ -102,6 +103,18 @@ export async function getBackend(): Promise<LlmBackend | null> {
  *
  * 后端抛出的错误统一补上 prompt 版本，调用方拿到「结构不合法」时
  * 能一眼看出是哪版 prompt 的产出。
+ *
+ * ## 单点埋点
+ *
+ * 这里是**所有真实模型调用的唯一漏斗**：`LlmProvider` 的两个方法、`ragService`、
+ * `scripts/eval-answer.ts`、`scripts/verify-usage.ts` 全都只经过它。一行一条调用，
+ * 等于一份日志形态的成本账 —— 对没有 userId 的脚本尤其重要，那些调用
+ * `usageSink` 一行都不会往库里写。
+ *
+ * **记不了「是否降级」**，因为降级的两条路径根本不进这个函数：预算降级在
+ * `guardedProvider.pick()` 就换成 `RuleProvider` 了，配置降级（指定了 provider 但缺
+ * key）在 `provider.ts` 的 `getProvider()` 就换成 `RuleProvider` 了。两处各自记
+ * warn，靠 `requestId` 和这里串起来。
  */
 export async function chatJson<T>({ promptVersion, ...opts }: ChatJsonOptions<T>): Promise<T> {
   const backend = await getBackend();
@@ -110,8 +123,28 @@ export async function chatJson<T>({ promptVersion, ...opts }: ChatJsonOptions<T>
       "未配置任何大模型 key（DEEPSEEK_API_KEY 或 ANTHROPIC_API_KEY），无法调用 AI",
     );
   }
+
+  // 包装 onUsage 取用量，而不是自己另起一个计时器：`usage` 里的 latencyMs 才是
+  // 落进 `LlmUsageRecord` 的那个数（DeepSeek 侧含重试的墙钟、Claude 侧是单次 SDK
+  // 调用）。日志和账本共用同一个对象，才不会出现"日志说 1.8s、库里记 0.9s"这种对不上。
+  //
+  // 成功路径上 `usage` 一定有值：两个后端都在**任何校验之前**回调（各自注释里写了
+  // 为什么），所以只要能返回结果，就说明回调已经发生过。省掉一个永远不会触发的兜底。
+  let usage: LlmUsage | undefined;
+  const onUsage = (u: LlmUsage) => {
+    // 顺序要紧：先记下自己的，再交给调用方。调用方的 sink 抛不抛是它自己的契约
+    // （见 `ChatJsonOptions.onUsage`），不该连累这条日志。
+    usage = u;
+    opts.onUsage?.(u);
+  };
+
   try {
-    return await backend.chatJson(opts);
+    const result = await backend.chatJson({ ...opts, onUsage });
+    // `usage.provider` 就是 mode：各后端把它设成自己的 name，取值域与 `LlmMode` 的
+    // deepseek / claude 对齐。**这一行永远不会是 "rule"** —— rule 模式在
+    // `getBackend()` 就返回 null 并抛错了，走不到这里。所以别指望从这行看出降级。
+    logger.info({ ...usage, promptVersion, requestId: opts.requestId }, "[llm] 调用完成");
+    return result;
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     throw new Error(promptVersion ? `[prompt ${promptVersion}] ${message}` : message, {
