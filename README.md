@@ -113,3 +113,7 @@ npm run build
 ```
 
 `npm run build` 会额外产出 `.next/standalone`（`next.config.ts` 里的 `output: "standalone"`，给 Docker 用）。`npm run dev` / `npm start` 不受影响。
+
+CI（`.github/workflows/ci.yml`）在 push 时跑 `npm ci` → `prisma generate` → `lint` → `tsc --noEmit` → `test`。
+
+**检索评测（`eval:retrieval` / `eval:answer`）刻意不进 CI**：它要一个跑着的本地 Ollama（bge-m3）加 `rag-service/data/vectors.db`，而 `data/` 整个在 `.gitignore` 里（语料 + 向量库都不进仓库），runner 上既没有也无从重建。这两个脚本在本地跑，见上面的 RAG 一节。

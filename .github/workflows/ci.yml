@@ -1,0 +1,36 @@
+name: CI
+
+# 只跑 push：本仓只有 Fitness_Assistant 一条分支，走的是直接推送，不开 PR。
+# 以后要接 PR 就补一行 `pull_request:`。
+on: push
+
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          # 与开发机对齐（本机 node v26.4.0）。Next 16.3.1 自身只要求 >=20.9.0，
+          # 但 CI 该测的是实际在跑的那个版本，不是最低可跑的版本。
+          node-version: "26"
+          cache: npm
+
+      - run: npm ci
+
+      # 必须显式跑，两件事都靠它：
+      #   1. @prisma/client 的类型（tsc 找不到 PrismaClient 就红）
+      #   2. 平台引擎（schema 里没有 binaryTargets，靠探测 openssl 决定下哪个）
+      # package.json 没有 postinstall，不跑这行就什么都没有。
+      - run: npx prisma generate
+
+      - run: npm run lint
+
+      # 类型检查。`npm run lint` 是裸 eslint，不做类型检查；CI 里也不跑
+      # `next build`，所以少了这步的话类型错误要等本地构建才暴露。
+      # 已验证：在「没有 next-env.d.ts、没有 .next/」的干净状态（即 runner 上的状态）
+      # 下 `tsc --noEmit` 通过 —— 它列在 tsconfig 的 include 里，但文件缺席只是被跳过。
+      - run: npx tsc --noEmit
+
+      - run: npm test

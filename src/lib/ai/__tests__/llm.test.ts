@@ -132,8 +132,14 @@ describe("getBackend", () => {
     process.env.ANTHROPIC_API_KEY = "sk-ant-x";
     process.env.AI_PROVIDER = "claude";
     // 后端是动态 import 的，所以这条顺带验了模块路径没写错。
+    //
+    // 单独放宽到 15s，是这一条唯一需要的特殊待遇：动态 import 拖进来的是
+    // @anthropic-ai/sdk（9.1MB），首次 transform 的耗时随机器负载在 9s ~ 73s 之间摆
+    // （实测），而 vitest 默认 testTimeout 是 5s —— 同一台机器连跑六次出现过 1 次、
+    // 2 次超时，报的都是这里。CI 的 runner 只有 2 核，不单独放宽就是随机红。
+    // 不用全局 testTimeout：那会连真正挂死的用例一起掩盖掉。
     expect((await getBackend())?.name).toBe("claude");
-  });
+  }, 15000);
 
   it("和 resolveMode 不错配：非 rule 模式一定拿得到后端", async () => {
     process.env.DEEPSEEK_API_KEY = "sk-x";
