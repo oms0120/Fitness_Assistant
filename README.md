@@ -49,6 +49,8 @@ cd rag-service
 
 换 embedding 模型后必须重跑 `ingest.py` 重建索引，否则 `/search` 会返回维度不一致的提示。Ollama 或向量库不可用时，前端会降级为"未检索到相关文档片段"，不会报错中断。
 
+这条降级路径有个容易误判的坑：Ollama 默认空闲 5 分钟就卸载模型，之后再加载 `bge-m3`（1.1GB）实测要 4~22s，超过 Node 侧 `RAG_TIMEOUT_MS` 的 15s 默认值 —— 症状是**空闲后第一次问答丢掉全部出处、再问一次就正常**。`embedding.py` 因此在 embed 请求里带了 `keep_alive`（默认 `-1`，模型常驻），从源头消掉这个冷启动。想省内存就把 `OLLAMA_KEEP_ALIVE` 设成 `30m` 这类时长。
+
 ## Docker
 
 整条链路（Next + 检索服务）一条命令起，Ollama 仍跑在宿主机上。
@@ -100,6 +102,7 @@ docker compose up --build
 | `RAG_SERVICE_URL` | Python 检索服务地址（默认 `http://127.0.0.1:8000`） |
 | `OLLAMA_BASE_URL` | Ollama 地址（默认 `http://127.0.0.1:11434`） |
 | `OLLAMA_EMBED_MODEL` | embedding 模型名（默认 `bge-m3`） |
+| `OLLAMA_KEEP_ALIVE` | 模型驻留时长（默认 `-1`，永不卸载）。设 `30m` 这类时长可省内存，代价是空闲后第一次问答要等冷加载 |
 
 ## 测试
 
