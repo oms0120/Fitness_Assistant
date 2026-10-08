@@ -27,10 +27,18 @@ jobs:
 
       - run: npm run lint
 
+      # 必须先生成类型再检查，不能直接 tsc。
+      # Next 16 的 `LayoutProps` / `PageProps` / 路由类型是**生成物**，落在
+      # .next/types/routes.d.ts，并由 next-env.d.ts 引用 —— 两者都在 .gitignore 里，
+      # 所以 runner 上根本不存在。跳过这步直接 tsc，报的是
+      #   src/app/layout.tsx(57,50): error TS2304: Cannot find name 'LayoutProps'.
+      # （已在「移走 .next/ 与 next-env.d.ts」的状态下实测复现，typegen 后 exit 0。）
+      # 这也是 Next 16 文档给的 CI 用法：next typegen && tsc --noEmit，见
+      # node_modules/next/dist/docs/01-app/03-api-reference/06-cli/next.md
+      - run: npx next typegen
+
       # 类型检查。`npm run lint` 是裸 eslint，不做类型检查；CI 里也不跑
-      # `next build`，所以少了这步的话类型错误要等本地构建才暴露。
-      # 已验证：在「没有 next-env.d.ts、没有 .next/」的干净状态（即 runner 上的状态）
-      # 下 `tsc --noEmit` 通过 —— 它列在 tsconfig 的 include 里，但文件缺席只是被跳过。
+      # `next build`，少了这步类型错误要等本地构建才暴露。
       - run: npx tsc --noEmit
 
       - run: npm test
