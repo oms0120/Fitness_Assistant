@@ -28,7 +28,14 @@ from server import DB_PATH, search_chunks  # noqa: E402
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))  # rag-service/
 REPO_ROOT = os.path.dirname(ROOT)
-DEFAULT_GOLDEN = os.path.join(ROOT, "eval", "golden.jsonl")
+# 默认 provisional，与 build_curation.py / pool_sweep.py / rerank_pool_curve.py /
+# rerank_smoke.py 四个脚本一致。
+#
+# 这里曾经默认 golden.jsonl —— 按 golden.schema.md，那是**人工校对后**才写入的最终集，
+# 目前还是 0 字节，于是不带任何参数跑必然 `sys.exit`「是空的」。而两份已跑的报告
+# （baseline-report.md / ablation-table.md）用的都是 provisional，`--golden` 的用法示例
+# 也一直显式写着它。默认值跟其余五个地方都不一致，属于漏改。
+DEFAULT_GOLDEN = os.path.join(ROOT, "eval", "golden.provisional.jsonl")
 # k 一路取到 100：**曲线形状**才决定瓶颈在召回还是排序 ——
 # 尾部还在爬 = 正确片段压根没进候选池（改召回）；很快到 1.000 = 只是前几位排错了（改 rerank）。
 # 只报 k=1/3/5 看不出这个区别，而"召回还是排序"正是这份评测要回答的唯一问题。

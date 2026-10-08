@@ -54,7 +54,10 @@ for (const file of [".env.local", ".env"]) {
   }
 }
 
-const DEFAULT_GOLDEN = "rag-service/eval/golden.jsonl";
+// 默认 provisional —— 与 run_retrieval_eval.py 及 eval/ 下那四个脚本一致。
+// golden.jsonl 按 golden.schema.md 是人工校对后才写入的最终集，目前是 0 字节；
+// 指着它的话不带 --golden 跑必然空转。
+const DEFAULT_GOLDEN = "rag-service/eval/golden.provisional.jsonl";
 
 interface GoldenRecord {
   id: string;
