@@ -2,6 +2,7 @@ import type { RecipeRequest, PlanRequest, RecipeSuggestion, PlanSuggestion } fro
 import { RuleProvider } from "./ruleProvider";
 import { LlmProvider } from "./llmProvider";
 import { BudgetGuardedProvider } from "./guardedProvider";
+import { ErrorFallbackProvider } from "./errorFallbackProvider";
 import { resolveMode } from "./llm";
 import { canSpend, usageSink } from "./usage";
 import { logger } from "@/lib/logger";
@@ -44,12 +45,24 @@ export function getProvider(userId?: string, requestId?: string): AiProvider {
   }
 
   if (mode === "rule") return new RuleProvider();
+
+  // 评测脚本没有用户（`scripts/eval-answer.ts`），**这里刻意不给它兜底**。
+  // 把模型失败悄悄换成规则库产出，评测量的就成了规则库，而报告上写的是模型的名字 ——
+  // 那种报告比一份失败的评测更有害。宁可让它抛。
   if (!userId) return new LlmProvider(undefined, requestId);
 
-  return new BudgetGuardedProvider(
-    new LlmProvider(usageSink(userId, requestId), requestId),
+  // 两层兜底，各自负责一段，顺序不能换：
+  //   内层 BudgetGuarded —— 花钱**之前**拦，超预算直接转规则库，一次模型都不调；
+  //   外层 ErrorFallback —— 模型**调用失败**时转规则库（上游 5xx / 断网 / 超时）。
+  // 换过来的话外层拦不住异常，而且得改 guardedProvider 的 degraded 取值。
+  return new ErrorFallbackProvider(
+    new BudgetGuardedProvider(
+      new LlmProvider(usageSink(userId, requestId), requestId),
+      new RuleProvider(),
+      () => canSpend(userId, requestId),
+      requestId,
+    ),
     new RuleProvider(),
-    () => canSpend(userId, requestId),
     requestId,
   );
 }

@@ -125,7 +125,9 @@ rag-service/                         # Python RAG 服务（独立进程）
 
 1. **schema 单一事实源**：同一份 zod schema 既校验表单输入，又约束模型输出，还经 `z.toJSONSchema()` 复用为 prompt 约束，避免类型定义与 prompt 漂移。
 2. **双后端抹平能力差异**：Claude 原生保证结构，DeepSeek 仅保证合法 JSON，故 DeepSeek 分支额外做 schema 注入 + 二次校验。
-3. **三级降级**：无 key → 规则库；模型异常 → 规则库；检索服务离线 → 无上下文问答。任一依赖故障不阻断主流程。
+3. **三级降级**：无 key → 规则库（`provider.ts` 的 `resolveMode`）；模型异常 → 规则库（`errorFallbackProvider`，上游 5xx / 断网 / 超时都算，原先只在两个路由里 catch 成 500，规则库其实已经注入却没人用）；检索服务离线 → 无上下文问答（`ragClient` 返回空数组）。菜谱/计划任一依赖故障不阻断主流程，降级时响应体带 `degraded: true` 并留一条 warn —— 那个字段到浏览器就没了，日志是事后唯一的痕迹。`getProvider()` 不传 `userId` 时（评测脚本）**刻意不兜底**：把模型失败悄悄换成规则库产出，评测量的就成了规则库而报告上写着模型的名字。
+
+   **RAG 问答只吃第三级**：没配 key 时 `askWithRag` 直接抛错，模型异常同样只能报错 —— 问答没有规则库可顶替，硬塞一份规则库菜谱反而更糟。
 4. **惰性加载**：后端用动态 `import()`，未配置的厂商 SDK 不进入运行时。
 5. **prompt 集中且带版本**：菜谱、计划、RAG 三处 prompt 统一放在 `prompts.ts`（RAG 因含片段插值做成模板函数），各带 `*_PROMPT_VERSION`；版本号随调用进入错误信息，prompt 回归时可定位。
 
